@@ -1,3 +1,4 @@
+// meteor-v3/imports/api/facebook/importer.js
 import { Meteor } from 'meteor/meteor';
 import { check } from 'meteor/check';
 import { get, isArray, isString } from 'lodash';
@@ -33,32 +34,54 @@ export class FacebookImporter {
       persons: 0,
       careTeams: 0
     };
+    
+    // Add tracking counters
+    this.counters = {
+      totalRecords: 0,
+      processedRecords: 0,
+      currentPhase: 'initializing'
+    };
   }
 
   async processData(facebookData) {
     try {
       await this.updateJobStatus('processing', 0);
       
+      // Count total records first for better progress tracking
+      this.counters.totalRecords = this.countTotalRecords(facebookData);
+      await this.updateJobProgress('counting', 5);
+      
       // Create or update patient record
+      this.counters.currentPhase = 'patient';
       await this.createPatientRecord();
+      await this.updateJobProgress('patient', 10);
       
       // Process different data types
       if (get(facebookData, 'posts')) {
+        this.counters.currentPhase = 'posts';
         await this.processPosts(facebookData.posts);
+        await this.updateJobProgress('posts', 60);
       }
       
       if (get(facebookData, 'friends')) {
+        this.counters.currentPhase = 'friends';
         await this.processFriends(facebookData.friends);
+        await this.updateJobProgress('friends', 75);
       }
       
       if (get(facebookData, 'photos')) {
+        this.counters.currentPhase = 'photos';
         await this.processPhotos(facebookData.photos);
+        await this.updateJobProgress('photos', 90);
       }
       
       if (get(facebookData, 'messages')) {
+        this.counters.currentPhase = 'messages';
         await this.processMessages(facebookData.messages);
+        await this.updateJobProgress('messages', 95);
       }
       
+      this.counters.currentPhase = 'completed';
       await this.updateJobStatus('completed', 100, this.stats);
       
       return this.stats;
@@ -68,6 +91,25 @@ export class FacebookImporter {
       await this.updateJobStatus('failed', null, null, error.message);
       throw error;
     }
+  }
+
+  countTotalRecords(facebookData) {
+    let total = 0;
+    
+    const posts = get(facebookData, 'posts', []);
+    if (isArray(posts)) total += posts.length;
+    
+    const friends = get(facebookData, 'friends', []);
+    if (isArray(friends)) total += friends.length;
+    
+    const photos = get(facebookData, 'photos', []);
+    if (isArray(photos)) total += photos.length;
+    
+    const messages = get(facebookData, 'messages', []);
+    if (isArray(messages)) total += messages.length;
+    
+    console.log(`Total records to process: ${total}`);
+    return total;
   }
 
   async createPatientRecord() {
@@ -103,6 +145,7 @@ export class FacebookImporter {
 
     const patientId = await Patients.insertWithUser(this.userId, patient);
     this.stats.patients++;
+    this.counters.processedRecords++;
     return patientId;
   }
 
@@ -112,20 +155,27 @@ export class FacebookImporter {
     const totalPosts = posts.length;
     let processed = 0;
 
+    console.log(`Processing ${totalPosts} posts...`);
+
     for (const post of posts) {
       try {
         await this.processPost(post);
         processed++;
+        this.counters.processedRecords++;
         
-        if (processed % 10 === 0) {
-          const progress = Math.floor((processed / totalPosts) * 70); // 70% of total progress
-          await this.updateJobStatus('processing', progress);
+        // Update progress every 50 posts
+        if (processed % 50 === 0) {
+          const currentProgress = 10 + Math.floor((processed / totalPosts) * 50);
+          await this.updateJobProgress('posts', currentProgress);
+          console.log(`Processed ${processed}/${totalPosts} posts (${currentProgress}%)`);
         }
       } catch (error) {
         console.error('Error processing post:', error);
         await this.logError(error, { post });
       }
     }
+    
+    console.log(`Completed processing ${processed} posts`);
   }
 
   async processPost(post) {
@@ -211,12 +261,14 @@ export class FacebookImporter {
           display: 'Original social media post'
         }]
       }],
-      finding: findings.map(finding => ({
-        item: {
-          text: finding.term
-        },
-        cause: finding.confidence > 0.7 ? 'likely' : 'possible'
-      }))
+      finding: findings.map(function(finding) {
+        return {
+          item: {
+            text: finding.term
+          },
+          cause: finding.confidence > 0.7 ? 'likely' : 'possible'
+        };
+      })
     };
 
     await ClinicalImpressions.insertWithUser(this.userId, clinicalImpression);
@@ -252,6 +304,7 @@ export class FacebookImporter {
   async processFriends(friends) {
     if (!isArray(friends)) return;
 
+    console.log(`Processing ${friends.length} friends...`);
     const careTeamParticipants = [];
 
     for (const friend of friends) {
@@ -276,6 +329,7 @@ export class FacebookImporter {
 
       const personId = await Persons.insertWithUser(this.userId, person);
       this.stats.persons++;
+      this.counters.processedRecords++;
 
       // Add to care team
       careTeamParticipants.push({
@@ -309,27 +363,40 @@ export class FacebookImporter {
       await CareTeams.insertWithUser(this.userId, careTeam);
       this.stats.careTeams++;
     }
+
+    console.log(`Completed processing ${friends.length} friends`);
   }
 
   async processPhotos(photos) {
-    // Similar to media processing in posts
     if (!isArray(photos)) return;
+
+    console.log(`Processing ${photos.length} photos...`);
+    let processed = 0;
 
     for (const photo of photos) {
       try {
         await this.createMediaResource(photo, 
           photo.creation_timestamp ? moment.unix(photo.creation_timestamp).toDate() : new Date()
         );
+        processed++;
+        this.counters.processedRecords++;
+        
+        if (processed % 25 === 0) {
+          console.log(`Processed ${processed}/${photos.length} photos`);
+        }
       } catch (error) {
         console.error('Error processing photo:', error);
         await this.logError(error, { photo });
       }
     }
+    
+    console.log(`Completed processing ${processed} photos`);
   }
 
   async processMessages(messages) {
     // Process private messages as Communications
     // Implementation similar to posts but with different recipient handling
+    console.log(`Processing ${messages.length || 0} messages...`);
   }
 
   getContentType(mediaData) {
@@ -341,7 +408,15 @@ export class FacebookImporter {
     return 'application/octet-stream';
   }
 
-  async updateJobStatus(status, progress = null, results = null, error = null) {
+  async updateJobProgress(phase, progress) {
+    await this.updateJobStatus('processing', progress, null, null, {
+      phase: phase,
+      totalRecords: this.counters.totalRecords,
+      processedRecords: this.counters.processedRecords
+    });
+  }
+
+  async updateJobStatus(status, progress = null, results = null, error = null, metadata = {}) {
     const updateDoc = {
       status,
       updatedAt: new Date()
@@ -350,6 +425,12 @@ export class FacebookImporter {
     if (progress !== null) updateDoc.progress = progress;
     if (results !== null) updateDoc.results = results;
     if (error !== null) updateDoc.errors = [{ message: error, timestamp: new Date() }];
+    
+    // Add metadata fields
+    if (metadata.totalRecords) updateDoc.totalRecords = metadata.totalRecords;
+    if (metadata.processedRecords) updateDoc.processedRecords = metadata.processedRecords;
+    if (metadata.phase) updateDoc.currentPhase = metadata.phase;
+    
     if (status === 'processing' && !await ImportJobs.findOneAsync({ _id: this.jobId, startedAt: { $exists: true } })) {
       updateDoc.startedAt = new Date();
     }
@@ -358,6 +439,9 @@ export class FacebookImporter {
     }
 
     await ImportJobs.updateAsync({ _id: this.jobId }, { $set: updateDoc });
+    
+    // Log progress for debugging
+    console.log(`Job ${this.jobId} - ${status}: ${progress}% (${metadata.processedRecords}/${metadata.totalRecords}) - Phase: ${metadata.phase}`);
   }
 
   async logError(error, context = {}) {
@@ -374,5 +458,7 @@ export class FacebookImporter {
         $inc: { errorCount: 1 }
       }
     );
+    
+    console.error(`Import error in job ${this.jobId}:`, errorDoc);
   }
 }

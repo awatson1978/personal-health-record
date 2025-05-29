@@ -1,3 +1,4 @@
+
 {
   "public": {
     "appName": "Facebook FHIR Timeline",
@@ -19,13 +20,15 @@
     "security": {
       "bcryptRounds": 12,
       "sessionTimeout": 86400000,
-      "maxUploadSize": 104857600,
+      "maxUploadSize": 5368709120,
       "allowedFileTypes": [".zip", ".json", ".html"]
     },
     "processing": {
       "maxConcurrentJobs": 5,
       "chunkSize": 1000,
-      "progressUpdateInterval": 1000
+      "progressUpdateInterval": 1000,
+      "testParseSize": 104857600,
+      "workingDirectory": "/tmp/facebook-fhir-processing"
     },
     "fhir": {
       "version": "4.0.1",

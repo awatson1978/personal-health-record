@@ -1,3 +1,4 @@
+// meteor-v3/imports/api/fhir/server/methods.js
 import { Meteor } from 'meteor/meteor';
 import { check, Match } from 'meteor/check';
 import { get } from 'lodash';
@@ -13,6 +14,175 @@ import {
 } from '../collections';
 
 Meteor.methods({
+  async 'fhir.deleteCommunication'(communicationId) {
+    check(communicationId, String);
+    
+    if (!this.userId) {
+      throw new Meteor.Error('not-authorized', 'Must be logged in');
+    }
+
+    const communication = await Communications.findOneAsync({ 
+      _id: communicationId, 
+      userId: this.userId 
+    });
+    
+    if (!communication) {
+      throw new Meteor.Error('not-found', 'Communication not found');
+    }
+
+    // Also delete any related clinical impressions that reference this communication
+    const relatedImpressions = await ClinicalImpressions.find({
+      userId: this.userId,
+      'investigation.item.reference': `Communication/${communicationId}`
+    }).fetchAsync();
+
+    for (const impression of relatedImpressions) {
+      await ClinicalImpressions.removeAsync({ _id: impression._id });
+      console.log(`Deleted related clinical impression ${impression._id}`);
+    }
+
+    await Communications.removeAsync({ _id: communicationId });
+    console.log(`Deleted communication ${communicationId} and ${relatedImpressions.length} related impressions`);
+    
+    return {
+      success: true,
+      deletedCommunication: communicationId,
+      deletedImpressions: relatedImpressions.length
+    };
+  },
+
+  async 'fhir.deleteClinicalImpression'(impressionId) {
+    check(impressionId, String);
+    
+    if (!this.userId) {
+      throw new Meteor.Error('not-authorized', 'Must be logged in');
+    }
+
+    const impression = await ClinicalImpressions.findOneAsync({ 
+      _id: impressionId, 
+      userId: this.userId 
+    });
+    
+    if (!impression) {
+      throw new Meteor.Error('not-found', 'Clinical impression not found');
+    }
+
+    await ClinicalImpressions.removeAsync({ _id: impressionId });
+    console.log(`Deleted clinical impression ${impressionId}`);
+    
+    return {
+      success: true,
+      deletedImpression: impressionId
+    };
+  },
+
+  async 'fhir.deleteMedia'(mediaId) {
+    check(mediaId, String);
+    
+    if (!this.userId) {
+      throw new Meteor.Error('not-authorized', 'Must be logged in');
+    }
+
+    const media = await Media.findOneAsync({ 
+      _id: mediaId, 
+      userId: this.userId 
+    });
+    
+    if (!media) {
+      throw new Meteor.Error('not-found', 'Media not found');
+    }
+
+    await Media.removeAsync({ _id: mediaId });
+    console.log(`Deleted media ${mediaId}`);
+    
+    return {
+      success: true,
+      deletedMedia: mediaId
+    };
+  },
+
+  async 'fhir.deletePerson'(personId) {
+    check(personId, String);
+    
+    if (!this.userId) {
+      throw new Meteor.Error('not-authorized', 'Must be logged in');
+    }
+
+    const person = await Persons.findOneAsync({ 
+      _id: personId, 
+      userId: this.userId 
+    });
+    
+    if (!person) {
+      throw new Meteor.Error('not-found', 'Person not found');
+    }
+
+    // Remove from any care teams
+    await CareTeams.updateAsync(
+      { 
+        userId: this.userId,
+        'participant.member.reference': `Person/${personId}`
+      },
+      { 
+        $pull: { 
+          participant: { 
+            'member.reference': `Person/${personId}` 
+          } 
+        } 
+      },
+      { multi: true }
+    );
+
+    await Persons.removeAsync({ _id: personId });
+    console.log(`Deleted person ${personId}`);
+    
+    return {
+      success: true,
+      deletedPerson: personId
+    };
+  },
+
+  async 'fhir.bulkDelete'(resourceType, resourceIds) {
+    check(resourceType, String);
+    check(resourceIds, [String]);
+    
+    if (!this.userId) {
+      throw new Meteor.Error('not-authorized', 'Must be logged in');
+    }
+
+    let collection;
+    switch (resourceType) {
+      case 'Communication':
+        collection = Communications;
+        break;
+      case 'ClinicalImpression':
+        collection = ClinicalImpressions;
+        break;
+      case 'Media':
+        collection = Media;
+        break;
+      case 'Person':
+        collection = Persons;
+        break;
+      default:
+        throw new Meteor.Error('invalid-type', 'Invalid resource type');
+    }
+
+    const deleteResult = await collection.removeAsync({
+      _id: { $in: resourceIds },
+      userId: this.userId
+    });
+
+    console.log(`Bulk deleted ${deleteResult} ${resourceType} records`);
+    
+    return {
+      success: true,
+      deletedCount: deleteResult,
+      resourceType
+    };
+  },
+
+  // Existing methods continue here...
   async 'fhir.getPatientSummary'() {
     if (!this.userId) {
       throw new Meteor.Error('not-authorized', 'Must be logged in');

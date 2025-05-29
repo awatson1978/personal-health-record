@@ -59,22 +59,22 @@ function Dashboard() {
     const userId = Meteor.userId();
     if (!userId) return { isLoading: true };
 
-    // Subscribe to user data
+    // Subscribe to user data with higher limits
     const patientsHandle = Meteor.subscribe('user.patients');
-    const communicationsHandle = Meteor.subscribe('user.communications.recent');
-    const clinicalHandle = Meteor.subscribe('user.clinicalImpressions.recent');
-    const mediaHandle = Meteor.subscribe('user.media.recent');
-    const importsHandle = Meteor.subscribe('user.imports.recent');
+    const communicationsHandle = Meteor.subscribe('user.communications', 50); // Increased limit
+    const clinicalHandle = Meteor.subscribe('user.clinicalImpressions', 50); // Increased limit
+    const mediaHandle = Meteor.subscribe('user.media', 20);
+    const importsHandle = Meteor.subscribe('user.imports');
 
     const isLoading = !patientsHandle.ready() || 
-                     !communicationsHandle.ready() || 
-                     !clinicalHandle.ready() ||
-                     !mediaHandle.ready() ||
-                     !importsHandle.ready();
+                    !communicationsHandle.ready() || 
+                    !clinicalHandle.ready() ||
+                    !mediaHandle.ready() ||
+                    !importsHandle.ready();
 
     if (isLoading) return { isLoading: true };
 
-    // Get statistics
+    // Get statistics - these should show full counts
     const stats = {
       totalCommunications: Communications.find({ userId }).count(),
       totalClinicalImpressions: ClinicalImpressions.find({ userId }).count(),
@@ -82,15 +82,15 @@ function Dashboard() {
       totalImports: ImportJobs.find({ userId, status: 'completed' }).count()
     };
 
-    // Get recent data
+    // Get recent data for display
     const recentClinicalImpressions = ClinicalImpressions.find(
       { userId },
-      { sort: { date: -1 }, limit: 5 }
+      { sort: { date: -1 }, limit: 20 } // Show more recent items
     ).fetch();
 
     const recentCommunications = Communications.find(
       { userId },
-      { sort: { sent: -1 }, limit: 5 }
+      { sort: { sent: -1 }, limit: 20 } // Show more recent items
     ).fetch();
 
     // Get active imports
@@ -240,12 +240,22 @@ function Dashboard() {
           {hasData ? (
             <Card>
               <CardContent>
-                <Typography variant="h6" gutterBottom>
-                  Recent Activity
-                </Typography>
+                <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
+                  <Typography variant="h6">
+                    Recent Activity
+                  </Typography>
+                  <Button
+                    size="small"
+                    onClick={function() { navigate('/timeline'); }}
+                  >
+                    View All
+                  </Button>
+                </Box>
                 <RecentActivity
                   clinicalImpressions={recentClinicalImpressions}
                   communications={recentCommunications}
+                  limit={10}
+                  showPagination={false}
                 />
               </CardContent>
             </Card>
