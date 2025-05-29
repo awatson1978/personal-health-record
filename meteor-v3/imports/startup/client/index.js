@@ -1,19 +1,12 @@
+// meteor-v3/imports/startup/client/index.js
 import { Meteor } from 'meteor/meteor';
 import { Accounts } from 'meteor/accounts-base';
 
-// Configure accounts
-Accounts.ui.config({
-  passwordSignupFields: 'EMAIL_ONLY',
-  loginPath: '/login',
-  signUpPath: '/register',
-  resetPasswordPath: '/reset-password',
-  profilePath: '/profile',
-  onSignedInHook: function() {
-    console.log('User signed in');
-  },
-  onSignedOutHook: function() {
-    console.log('User signed out');
-  }
+// Configure accounts (basic configuration without UI package)
+Accounts.config({
+  sendVerificationEmail: false,
+  forbidClientAccountCreation: false,
+  loginExpirationInDays: 30
 });
 
 // Global error handling
@@ -33,3 +26,7 @@ if ('serviceWorker' in navigator && Meteor.isProduction) {
       });
   });
 }
+
+// Log app startup
+console.log('🚀 Facebook FHIR Timeline Client Started');
+console.log('🌍 Environment:', Meteor.isDevelopment ? 'development' : 'production');

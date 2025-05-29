@@ -1,3 +1,4 @@
+// meteor-v3/imports/api/facebook/server/methods.js
 import { Meteor } from 'meteor/meteor';
 import { check, Match } from 'meteor/check';
 import { get } from 'lodash';
@@ -8,6 +9,150 @@ import { v4 as uuidv4 } from 'uuid';
 
 import { ImportJobs, ProcessingQueues } from '../../fhir/collections';
 import { FacebookImporter } from '../importer';
+
+// Helper functions
+async function processUploadedFile(jobId, filePath, filename) {
+  check(jobId, String);
+  check(filePath, String);
+  check(filename, String);
+
+  const job = await ImportJobs.findOneAsync({ _id: jobId });
+  if (!job) {
+    throw new Meteor.Error('job-not-found', 'Import job not found');
+  }
+
+  try {
+    let facebookData = {};
+
+    if (filename.endsWith('.zip')) {
+      facebookData = await extractAndParseZip(filePath);
+    } else if (filename.endsWith('.json')) {
+      const jsonContent = fs.readFileSync(filePath, 'utf8');
+      facebookData = JSON.parse(jsonContent);
+    } else {
+      throw new Meteor.Error('unsupported-format', 'Unsupported file format');
+    }
+
+    // Process the data
+    const importer = new FacebookImporter(job.userId, jobId);
+    const results = await importer.processData(facebookData);
+
+    console.log(`Facebook import completed for user ${job.userId}:`, results);
+
+    // Clean up file
+    if (fs.existsSync(filePath)) {
+      fs.unlinkSync(filePath);
+    }
+
+    return results;
+
+  } catch (error) {
+    console.error('Process file error:', error);
+    throw error;
+  }
+}
+
+async function extractAndParseZip(zipPath) {
+  return new Promise(function(resolve, reject) {
+    const extractedData = {};
+    
+    yauzl.open(zipPath, { lazyEntries: true }, function(err, zipfile) {
+      if (err) return reject(err);
+
+      let filesProcessed = 0;
+      let totalFiles = 0;
+
+      // Count total files first
+      zipfile.on('entry', function() { totalFiles++; });
+      
+      zipfile.readEntry();
+      
+      zipfile.on('entry', function(entry) {
+        if (/\/$/.test(entry.fileName)) {
+          // Directory entry
+          zipfile.readEntry();
+        } else {
+          // File entry
+          processZipEntry(zipfile, entry, extractedData, function(error) {
+            filesProcessed++;
+            
+            if (error) {
+              console.error(`Error processing ${entry.fileName}:`, error);
+            }
+            
+            if (filesProcessed >= totalFiles) {
+              resolve(extractedData);
+            } else {
+              zipfile.readEntry();
+            }
+          });
+        }
+      });
+
+      zipfile.on('end', function() {
+        if (filesProcessed >= totalFiles) {
+          resolve(extractedData);
+        }
+      });
+
+      zipfile.on('error', reject);
+    });
+  });
+}
+
+function processZipEntry(zipfile, entry, extractedData, callback) {
+  const fileName = entry.fileName.toLowerCase();
+  
+  // Only process relevant Facebook files
+  const relevantFiles = [
+    'posts.json',
+    'friends.json', 
+    'photos.json',
+    'messages.json',
+    'your_posts.json',
+    'your_friends.json'
+  ];
+
+  const isRelevant = relevantFiles.some(function(file) { 
+    return fileName.includes(file); 
+  });
+  
+  if (!isRelevant) {
+    return callback();
+  }
+
+  zipfile.openReadStream(entry, function(err, readStream) {
+    if (err) return callback(err);
+
+    let data = '';
+    readStream.on('data', function(chunk) {
+      data += chunk.toString('utf8');
+    });
+
+    readStream.on('end', function() {
+      try {
+        const jsonData = JSON.parse(data);
+        
+        // Map to standardized structure
+        if (fileName.includes('post')) {
+          extractedData.posts = jsonData;
+        } else if (fileName.includes('friend')) {
+          extractedData.friends = jsonData.friends || jsonData;
+        } else if (fileName.includes('photo')) {
+          extractedData.photos = jsonData.photos || jsonData;
+        } else if (fileName.includes('message')) {
+          extractedData.messages = jsonData.messages || jsonData;
+        }
+        
+        callback();
+      } catch (parseError) {
+        callback(parseError);
+      }
+    });
+
+    readStream.on('error', callback);
+  });
+}
 
 Meteor.methods({
   async 'facebook.uploadAndProcess'(filename, fileData) {
@@ -52,9 +197,9 @@ Meteor.methods({
       fs.writeFileSync(filePath, buffer);
 
       // Process file asynchronously
-      setImmediate(async () => {
+      setImmediate(async function() {
         try {
-          await this.processUploadedFile(jobId, filePath, filename);
+          await processUploadedFile(jobId, filePath, filename);
         } catch (error) {
           console.error('Error processing uploaded file:', error);
           await ImportJobs.updateAsync(
@@ -76,146 +221,6 @@ Meteor.methods({
       console.error('Upload error:', error);
       throw new Meteor.Error('upload-failed', error.message);
     }
-  },
-
-  async processUploadedFile(jobId, filePath, filename) {
-    check(jobId, String);
-    check(filePath, String);
-    check(filename, String);
-
-    const job = await ImportJobs.findOneAsync({ _id: jobId });
-    if (!job) {
-      throw new Meteor.Error('job-not-found', 'Import job not found');
-    }
-
-    try {
-      let facebookData = {};
-
-      if (filename.endsWith('.zip')) {
-        facebookData = await this.extractAndParseZip(filePath);
-      } else if (filename.endsWith('.json')) {
-        const jsonContent = fs.readFileSync(filePath, 'utf8');
-        facebookData = JSON.parse(jsonContent);
-      } else {
-        throw new Meteor.Error('unsupported-format', 'Unsupported file format');
-      }
-
-      // Process the data
-      const importer = new FacebookImporter(job.userId, jobId);
-      const results = await importer.processData(facebookData);
-
-      console.log(`Facebook import completed for user ${job.userId}:`, results);
-
-      // Clean up file
-      if (fs.existsSync(filePath)) {
-        fs.unlinkSync(filePath);
-      }
-
-      return results;
-
-    } catch (error) {
-      console.error('Process file error:', error);
-      throw error;
-    }
-  },
-
-  async extractAndParseZip(zipPath) {
-    return new Promise((resolve, reject) => {
-      const extractedData = {};
-      
-      yauzl.open(zipPath, { lazyEntries: true }, (err, zipfile) => {
-        if (err) return reject(err);
-
-        let filesProcessed = 0;
-        let totalFiles = 0;
-
-        // Count total files first
-        zipfile.on('entry', () => totalFiles++);
-        
-        zipfile.readEntry();
-        
-        zipfile.on('entry', (entry) => {
-          if (/\/$/.test(entry.fileName)) {
-            // Directory entry
-            zipfile.readEntry();
-          } else {
-            // File entry
-            this.processZipEntry(zipfile, entry, extractedData, (error) => {
-              filesProcessed++;
-              
-              if (error) {
-                console.error(`Error processing ${entry.fileName}:`, error);
-              }
-              
-              if (filesProcessed >= totalFiles) {
-                resolve(extractedData);
-              } else {
-                zipfile.readEntry();
-              }
-            });
-          }
-        });
-
-        zipfile.on('end', () => {
-          if (filesProcessed >= totalFiles) {
-            resolve(extractedData);
-          }
-        });
-
-        zipfile.on('error', reject);
-      });
-    });
-  },
-
-  processZipEntry(zipfile, entry, extractedData, callback) {
-    const fileName = entry.fileName.toLowerCase();
-    
-    // Only process relevant Facebook files
-    const relevantFiles = [
-      'posts.json',
-      'friends.json', 
-      'photos.json',
-      'messages.json',
-      'your_posts.json',
-      'your_friends.json'
-    ];
-
-    const isRelevant = relevantFiles.some(file => fileName.includes(file));
-    if (!isRelevant) {
-      return callback();
-    }
-
-    zipfile.openReadStream(entry, (err, readStream) => {
-      if (err) return callback(err);
-
-      let data = '';
-      readStream.on('data', (chunk) => {
-        data += chunk.toString('utf8');
-      });
-
-      readStream.on('end', () => {
-        try {
-          const jsonData = JSON.parse(data);
-          
-          // Map to standardized structure
-          if (fileName.includes('post')) {
-            extractedData.posts = jsonData;
-          } else if (fileName.includes('friend')) {
-            extractedData.friends = jsonData.friends || jsonData;
-          } else if (fileName.includes('photo')) {
-            extractedData.photos = jsonData.photos || jsonData;
-          } else if (fileName.includes('message')) {
-            extractedData.messages = jsonData.messages || jsonData;
-          }
-          
-          callback();
-        } catch (parseError) {
-          callback(parseError);
-        }
-      });
-
-      readStream.on('error', callback);
-    });
   },
 
   async 'facebook.getImportStatus'(jobId) {

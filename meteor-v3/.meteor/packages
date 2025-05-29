@@ -20,6 +20,7 @@ hot-module-replacement@0.5.4  # Update client in development without reloading t
 static-html@1.4.0             # Define static page content in .html files
 react-meteor-data       # React higher-order component for reactively tracking Meteor data
 accounts-base
-session
 accounts-password
+session
 random
+check
