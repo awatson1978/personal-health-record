@@ -67,6 +67,8 @@ import { ImportJobs } from '../../api/fhir/collections';
 function Import() {
   const navigate = useNavigate();
   const fileInputRef = useRef(null);
+  const directoryInputRef = useRef(null);
+  const zipInputRef = useRef(null);
   
   // Restore active step from session
   const [activeStep, setActiveStep] = useState(function() {
@@ -206,9 +208,36 @@ function Import() {
     }
   };
 
-  const handleScanDirectory = async function() {
-    if (!directoryPath.trim()) {
-      setUploadError('Please enter a directory path');
+  const handleDirectoryChoice = function(event) {
+    const files = event.target.files;
+    if (files && files.length > 0) {
+      // Get the directory path from the first file
+      const firstFile = files[0];
+      const path = firstFile.webkitRelativePath || firstFile.name;
+      const directoryName = path.split('/')[0];
+      
+      setDirectoryPath(directoryName);
+      
+      // Auto-scan the selected directory
+      handleScanDirectory(directoryName, files);
+    }
+  };
+
+  const handleZipChoice = function(event) {
+    const file = event.target.files[0];
+    if (file) {
+      setZipPath(file.name);
+      
+      // Auto-scan the selected ZIP file
+      handleScanZipFile(file);
+    }
+  };
+
+  const handleScanDirectory = async function(pathOverride = null, filesOverride = null) {
+    const targetPath = pathOverride || directoryPath.trim();
+    
+    if (!targetPath) {
+      setUploadError('Please choose a directory');
       return;
     }
 
@@ -217,12 +246,20 @@ function Import() {
     setInventory(null);
 
     try {
-      const result = await new Promise(function(resolve, reject) {
-        Meteor.call('facebook.scanDirectory', directoryPath.trim(), function(error, result) {
-          if (error) reject(error);
-          else resolve(result);
+      let result;
+      
+      if (filesOverride) {
+        // Handle browser directory selection
+        result = await processSelectedDirectory(filesOverride);
+      } else {
+        // Handle manual path input (server-side scan)
+        result = await new Promise(function(resolve, reject) {
+          Meteor.call('facebook.scanDirectory', targetPath, function(error, result) {
+            if (error) reject(error);
+            else resolve(result);
+          });
         });
-      });
+      }
 
       setInventory(result);
       setSelectedFiles(result.summary.testParseRecommendation?.suggested?.map(function(file) { 
@@ -231,15 +268,21 @@ function Import() {
 
     } catch (error) {
       console.error('Directory scan error:', error);
-      setUploadError(error.reason || 'Failed to scan directory. Please check the path and try again.');
+      setUploadError(error.reason || 'Failed to scan directory. Please check the selection and try again.');
     } finally {
       setScanning(false);
     }
   };
 
-  const handleScanZip = async function() {
+  const handleScanZipFile = async function(fileOverride = null) {
+    if (fileOverride) {
+      // Handle browser file selection - we'll need to read the ZIP on client side
+      setUploadError('ZIP file scanning from browser not yet implemented. Please use file path method.');
+      return;
+    }
+    
     if (!zipPath.trim()) {
-      setUploadError('Please enter a ZIP file path');
+      setUploadError('Please choose a ZIP file');
       return;
     }
 
@@ -262,10 +305,111 @@ function Import() {
 
     } catch (error) {
       console.error('ZIP scan error:', error);
-      setUploadError(error.reason || 'Failed to scan ZIP file. Please check the path and try again.');
+      setUploadError(error.reason || 'Failed to scan ZIP file. Please check the file and try again.');
     } finally {
       setScanning(false);
     }
+  };
+
+  const processSelectedDirectory = async function(files) {
+    // Process FileList from directory picker
+    const inventory = {
+      dirPath: 'Browser Selected Directory',
+      files: [],
+      categories: {
+        demographics: [],
+        friends: [],
+        posts: [],
+        messages: [],
+        media: [],
+        other: []
+      },
+      summary: {
+        totalFiles: 0,
+        totalSize: 0,
+        testParseRecommendation: null
+      }
+    };
+
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      const category = categorizeFile(file.name);
+      
+      const fileInfo = {
+        name: file.name,
+        path: file.webkitRelativePath || file.name,
+        size: file.size,
+        sizeFormatted: formatBytes(file.size),
+        category: category,
+        file: file // Store the actual File object for later processing
+      };
+
+      inventory.files.push(fileInfo);
+      inventory.categories[category].push(fileInfo);
+      inventory.summary.totalFiles++;
+      inventory.summary.totalSize += file.size;
+    }
+
+    inventory.summary.totalSizeFormatted = formatBytes(inventory.summary.totalSize);
+    inventory.summary.testParseRecommendation = generateTestParseRecommendation(inventory);
+
+    return inventory;
+  };
+
+  const categorizeFile = function(fileName) {
+    const lowerName = fileName.toLowerCase();
+    
+    if (lowerName.includes('profile') || lowerName.includes('about')) {
+      return 'demographics';
+    }
+    if (lowerName.includes('friend')) {
+      return 'friends';
+    }
+    if (lowerName.includes('post') || lowerName.includes('timeline') || lowerName.includes('wall')) {
+      return 'posts';
+    }
+    if (lowerName.includes('message') || lowerName.includes('inbox')) {
+      return 'messages';
+    }
+    if (lowerName.includes('photo') || lowerName.includes('video') || lowerName.includes('media')) {
+      return 'media';
+    }
+    
+    return 'other';
+  };
+
+  const generateTestParseRecommendation = function(inventory) {
+    const testParseSize = 104857600; // 100MB
+    let recommendation = {
+      suggested: [],
+      reason: '',
+      totalSize: 0
+    };
+
+    // Prioritize smaller, important files first
+    const priorities = ['demographics', 'friends', 'posts', 'messages', 'media'];
+    
+    for (const category of priorities) {
+      const files = inventory.categories[category];
+      for (const file of files) {
+        if (recommendation.totalSize + file.size <= testParseSize) {
+          recommendation.suggested.push(file);
+          recommendation.totalSize += file.size;
+        }
+      }
+      
+      if (recommendation.totalSize >= testParseSize * 0.8) {
+        break;
+      }
+    }
+
+    if (recommendation.suggested.length === 0) {
+      recommendation.reason = 'All files are too large for test parsing. Consider processing in production mode.';
+    } else {
+      recommendation.reason = `Recommended ${recommendation.suggested.length} files (${formatBytes(recommendation.totalSize)}) for initial test parsing.`;
+    }
+
+    return recommendation;
   };
 
   const handleProcessDirectory = async function() {
@@ -276,20 +420,121 @@ function Import() {
 
     try {
       const sourcePath = inventory.dirPath || inventory.filePath;
-      const jobId = await new Promise(function(resolve, reject) {
-        Meteor.call('facebook.processFromPath', sourcePath, selectedFiles, function(error, result) {
-          if (error) reject(error);
-          else resolve(result);
-        });
+      
+      // Check if this is a browser-selected directory (has File objects)
+      const isBrowserSelected = inventory.files.some(function(file) { 
+        return file.file instanceof File; 
       });
+      
+      if (isBrowserSelected) {
+        // Process browser-selected files differently
+        await handleProcessBrowserFiles();
+      } else {
+        // Use server-side path processing
+        const jobId = await new Promise(function(resolve, reject) {
+          Meteor.call('facebook.processFromPath', sourcePath, selectedFiles, function(error, result) {
+            if (error) reject(error);
+            else resolve(result);
+          });
+        });
 
-      console.log('Directory processing started, job ID:', jobId);
-      setActiveStep(2);
+        console.log('Directory processing started, job ID:', jobId);
+        setActiveStep(2);
+      }
       
     } catch (error) {
       console.error('Directory processing error:', error);
       setUploadError(error.reason || 'Failed to start processing. Please try again.');
     }
+  };
+
+  const handleProcessBrowserFiles = async function() {
+    if (!inventory || selectedFiles.length === 0) {
+      setUploadError('Please select files to process');
+      return;
+    }
+
+    try {
+      // Create import job first
+      const jobId = await new Promise(function(resolve, reject) {
+        Meteor.call('facebook.createDirectoryJob', 'Browser Selected Directory', selectedFiles, function(error, result) {
+          if (error) reject(error);
+          else resolve(result);
+        });
+      });
+
+      console.log('Browser file processing job created:', jobId);
+
+      // Filter inventory.files to only include selected files
+      const selectedFileInfos = inventory.files.filter(function(file) {
+        return selectedFiles.includes(file.path) && file.file instanceof File;
+      });
+
+      console.log(`Processing ${selectedFileInfos.length} selected files out of ${inventory.files.length} total files`);
+
+      // Process each selected file with batching
+      let processedCount = 0;
+      const totalFiles = selectedFileInfos.length;
+      const batchSize = 3; // Reduce batch size to prevent browser overload
+
+      for (let i = 0; i < selectedFileInfos.length; i += batchSize) {
+        const batch = selectedFileInfos.slice(i, i + batchSize);
+        
+        // Process batch in parallel
+        const batchPromises = batch.map(async function(fileInfo) {
+          try {
+            // Read file content
+            const fileContent = await readFileAsText(fileInfo.file);
+            
+            // Send content to server for processing
+            await new Promise(function(resolve, reject) {
+              Meteor.call('facebook.processFileContent', jobId, fileInfo.path, fileContent, function(error, result) {
+                if (error) reject(error);
+                else resolve(result);
+              });
+            });
+
+            processedCount++;
+            
+            // Log progress less frequently to reduce console spam
+            if (processedCount % 10 === 0 || processedCount === totalFiles) {
+              console.log(`Processed ${processedCount}/${totalFiles}: ${fileInfo.name}`);
+            }
+            
+            return { success: true, fileName: fileInfo.name };
+          } catch (error) {
+            console.error(`Error processing file ${fileInfo.name}:`, error);
+            return { success: false, fileName: fileInfo.name, error };
+          }
+        });
+
+        // Wait for batch to complete
+        await Promise.all(batchPromises);
+        
+        // Add delay between batches to prevent browser freezing
+        await new Promise(function(resolve) { setTimeout(resolve, 200); });
+      }
+
+      console.log(`Browser file processing completed: ${processedCount}/${totalFiles} files`);
+      setActiveStep(2);
+
+    } catch (error) {
+      console.error('Browser file processing error:', error);
+      setUploadError(error.reason || 'Failed to process browser-selected files. Please try again.');
+    }
+  };
+
+  const readFileAsText = function(file) {
+    return new Promise(function(resolve, reject) {
+      const reader = new FileReader();
+      reader.onload = function(e) {
+        resolve(e.target.result);
+      };
+      reader.onerror = function() {
+        reject(new Error('Failed to read file: ' + file.name));
+      };
+      reader.readAsText(file);
+    });
   };
 
   const toggleFileSelection = function(filePath) {
@@ -500,7 +745,7 @@ function Import() {
 
       <Grid container spacing={4}>
         {/* Left Column - Import Process */}
-        <Grid item xs={12} lg={8}>
+        <Grid item xs={12} lg={12}>
           {/* Import Steps */}
           <Paper sx={{ p: 3, mb: 3 }}>
             <Typography variant="h5" gutterBottom>
@@ -551,8 +796,8 @@ function Import() {
                             sx={{ mb: 2 }}
                           >
                             <Tab label="Upload File" />
-                            <Tab label="Scan Directory" />
-                            <Tab label="Scan ZIP File" />
+                            <Tab label="Choose Directory" />
+                            <Tab label="Choose ZIP File" />
                           </Tabs>
 
                           {uploadError && (
@@ -605,17 +850,51 @@ function Import() {
                             </Box>
                           )}
 
-                          {/* Directory Scan Tab */}
+                          {/* Directory Choose Tab */}
                           {tabValue === 1 && (
                             <Box>
                               <Alert severity="info" sx={{ mb: 2 }}>
-                                <AlertTitle>Directory Scan Mode</AlertTitle>
+                                <AlertTitle>Directory Selection Mode</AlertTitle>
                                 <Typography variant="body2">
-                                  Scan a local directory containing your extracted Facebook data.
+                                  Choose a local directory containing your extracted Facebook data.
                                   This allows you to review and select specific files before processing.
                                 </Typography>
                               </Alert>
 
+                              <Box sx={{ mb: 2 }}>
+                                <input
+                                  ref={directoryInputRef}
+                                  type="file"
+                                  webkitdirectory=""
+                                  directory=""
+                                  multiple
+                                  onChange={handleDirectoryChoice}
+                                  style={{ display: 'none' }}
+                                  id="directory-upload"
+                                />
+                                <label htmlFor="directory-upload">
+                                  <Button
+                                    variant="contained"
+                                    component="span"
+                                    disabled={scanning}
+                                    startIcon={scanning ? <CircularProgress size={20} /> : <FolderOpenIcon />}
+                                    size="large"
+                                  >
+                                    {scanning ? 'Scanning...' : 'Choose Directory'}
+                                  </Button>
+                                </label>
+                                
+                                {directoryPath && (
+                                  <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+                                    Selected: {directoryPath}
+                                  </Typography>
+                                )}
+                              </Box>
+
+                              <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                                Or enter directory path manually:
+                              </Typography>
+                              
                               <Box display="flex" alignItems="center" sx={{ mb: 2 }}>
                                 <TextField
                                   fullWidth
@@ -626,12 +905,12 @@ function Import() {
                                   sx={{ mr: 1 }}
                                 />
                                 <Button
-                                  variant="contained"
-                                  onClick={handleScanDirectory}
+                                  variant="outlined"
+                                  onClick={function() { handleScanDirectory(); }}
                                   disabled={scanning}
                                   startIcon={scanning ? <CircularProgress size={20} /> : <FolderIcon />}
                                 >
-                                  {scanning ? 'Scanning...' : 'Scan'}
+                                  {scanning ? 'Scanning...' : 'Scan Path'}
                                 </Button>
                               </Box>
 
@@ -639,16 +918,20 @@ function Import() {
                             </Box>
                           )}
 
-                          {/* ZIP Scan Tab */}
+                          {/* ZIP Choose Tab */}
                           {tabValue === 2 && (
                             <Box>
                               <Alert severity="info" sx={{ mb: 2 }}>
-                                <AlertTitle>ZIP Scan Mode</AlertTitle>
+                                <AlertTitle>ZIP File Selection Mode</AlertTitle>
                                 <Typography variant="body2">
-                                  Scan a ZIP file containing your Facebook data export.
-                                  This allows you to review the contents before extracting and processing.
+                                  Choose a ZIP file containing your Facebook data export.
+                                  Currently supports file path input only.
                                 </Typography>
                               </Alert>
+
+                              <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                                Enter ZIP file path:
+                              </Typography>
 
                               <Box display="flex" alignItems="center" sx={{ mb: 2 }}>
                                 <TextField
@@ -661,11 +944,11 @@ function Import() {
                                 />
                                 <Button
                                   variant="contained"
-                                  onClick={handleScanZip}
+                                  onClick={function() { handleScanZipFile(); }}
                                   disabled={scanning}
                                   startIcon={scanning ? <CircularProgress size={20} /> : <FileIcon />}
                                 >
-                                  {scanning ? 'Scanning...' : 'Scan'}
+                                  {scanning ? 'Scanning...' : 'Choose ZIP File'}
                                 </Button>
                               </Box>
 
@@ -733,7 +1016,7 @@ function Import() {
         </Grid>
 
         {/* Right Column - Import History */}
-        <Grid item xs={12} lg={4}>
+        <Grid item xs={12} lg={12}>
           <Paper sx={{ p: 3 }}>
             <Typography variant="h6" gutterBottom>
               Import History
@@ -759,40 +1042,44 @@ function Import() {
                         <ListItemText
                           primary={job.filename}
                           secondary={
-                            <Box>
-                              <Typography variant="caption" display="block">
+                            <React.Fragment>
+                              <Typography variant="caption" display="block" component="span">
                                 {moment(job.createdAt).format('MMM DD, YYYY HH:mm')}
                               </Typography>
                               {job.status === 'processing' && job.progress && (
-                                <Box sx={{ mt: 1 }}>
+                                <span style={{ display: 'block', marginTop: '4px' }}>
                                   <LinearProgress 
                                     variant="determinate" 
                                     value={job.progress} 
                                     size="small"
                                   />
-                                  <Typography variant="caption">
+                                  <Typography variant="caption" component="span">
                                     {job.progress}% complete
                                     {job.processedRecords && job.totalRecords && (
                                       <span> ({job.processedRecords}/{job.totalRecords} records)</span>
                                     )}
                                   </Typography>
-                                </Box>
+                                </span>
                               )}
                               {job.results && (
-                                <Box sx={{ mt: 1 }}>
-                                  <Chip
-                                    size="small"
-                                    label={`${get(job.results, 'communications', 0)} posts`}
-                                    sx={{ mr: 0.5, mb: 0.5 }}
-                                  />
-                                  <Chip
-                                    size="small"
-                                    label={`${get(job.results, 'clinicalImpressions', 0)} health records`}
-                                    sx={{ mr: 0.5, mb: 0.5 }}
-                                  />
-                                </Box>
+                                <span style={{ display: 'block', marginTop: '4px' }}>
+                                  <span style={{ marginRight: '4px', marginBottom: '4px', display: 'inline-block' }}>
+                                    <Chip
+                                      size="small"
+                                      label={`${get(job.results, 'communications', 0)} posts`}
+                                      component="span"
+                                    />
+                                  </span>
+                                  <span style={{ marginRight: '4px', marginBottom: '4px', display: 'inline-block' }}>
+                                    <Chip
+                                      size="small"
+                                      label={`${get(job.results, 'clinicalImpressions', 0)} health records`}
+                                      component="span"
+                                    />
+                                  </span>
+                                </span>
                               )}
-                            </Box>
+                            </React.Fragment>
                           }
                         />
                         <ListItemSecondaryAction>
@@ -801,20 +1088,21 @@ function Import() {
                               label={job.status}
                               size="small"
                               color={getStatusColor(job.status)}
-                              sx={{ mr: 1 }}
+                              sx={{ mr: 1, marginTop: '40px' }}
                             />
-                            {(job.status === 'completed' || job.status === 'failed') && (
-                              <IconButton
-                                edge="end"
-                                size="small"
-                                onClick={function() {
-                                  setSelectedJob(job);
-                                  setDeleteDialogOpen(true);
-                                }}
-                              >
-                                <DeleteIcon />
-                              </IconButton>
-                            )}
+                            <IconButton
+                              edge="end"
+                              size="small"
+                              onClick={function() {
+                                setSelectedJob(job);
+                                setDeleteDialogOpen(true);
+                              }}
+                              aria-label="delete import"
+                              color="error"
+                              sx={{ ml: 1, marginTop: '-5px' }}
+                            >
+                              <DeleteIcon />
+                            </IconButton>
                           </Box>
                         </ListItemSecondaryAction>
                       </ListItem>

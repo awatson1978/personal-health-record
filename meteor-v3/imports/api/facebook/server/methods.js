@@ -750,5 +750,66 @@ Meteor.methods({
       canRetry: job.status === 'failed' || job.status === 'cancelled',
       canDelete: job.status === 'completed' || job.status === 'failed' || job.status === 'cancelled'
     };
+  },
+
+   async 'facebook.createDirectoryJob'(dirPath, selectedFiles) {
+    check(dirPath, String);
+    check(selectedFiles, [String]);
+    
+    if (!this.userId) {
+      throw new Meteor.Error('not-authorized', 'Must be logged in to create jobs');
+    }
+
+    try {
+      // Create import job for browser-selected directory
+      const jobId = await ImportJobs.insertAsync({
+        userId: this.userId,
+        filename: `Directory: ${dirPath}`,
+        filePath: dirPath,
+        selectedFiles: selectedFiles,
+        status: 'pending',
+        totalRecords: selectedFiles.length,
+        processedRecords: 0,
+        createdAt: new Date(),
+        processingType: 'browser-directory'
+      });
+
+      console.log(`Created browser directory job ${jobId} for user ${this.userId} with ${selectedFiles.length} files`);
+      return jobId;
+      
+    } catch (error) {
+      console.error('Create browser directory job error:', error);
+      throw new Meteor.Error('job-creation-failed', error.message);
+    }
+  },
+   async 'facebook.createDirectoryJob'(dirPath, selectedFiles) {
+    check(dirPath, String);
+    check(selectedFiles, [String]);
+    
+    if (!this.userId) {
+      throw new Meteor.Error('not-authorized', 'Must be logged in to create jobs');
+    }
+
+    try {
+      // Create import job for browser-selected directory
+      const jobId = await ImportJobs.insertAsync({
+        userId: this.userId,
+        filename: `Directory: ${dirPath}`,
+        filePath: dirPath,
+        selectedFiles: selectedFiles,
+        status: 'pending',
+        totalRecords: selectedFiles.length, // Use selected files count
+        processedRecords: 0,
+        createdAt: new Date(),
+        processingType: 'browser-directory'
+      });
+
+      console.log(`Created browser directory job ${jobId} for user ${this.userId} with ${selectedFiles.length} selected files`);
+      return jobId;
+      
+    } catch (error) {
+      console.error('Create browser directory job error:', error);
+      throw new Meteor.Error('job-creation-failed', error.message);
+    }
   }
 });
