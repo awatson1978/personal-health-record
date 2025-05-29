@@ -1,4 +1,4 @@
-// StatCard.jsx
+// meteor-v3/imports/ui/components/StatCard.jsx
 import React from 'react';
 import {
   Card,
@@ -35,3 +35,4 @@ export function StatCard({ title, value, icon, color = 'primary', description })
   );
 }
 
+export default StatCard;

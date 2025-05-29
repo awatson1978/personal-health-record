@@ -1,4 +1,4 @@
-// meteor-v3/imports/ui/pages/index.js
+// meteor-v3/imports/ui/pages/index.jsx
 export { default as Dashboard } from './Dashboard';
 export { Timeline } from './Timeline';
 export { default as Import } from './Import';

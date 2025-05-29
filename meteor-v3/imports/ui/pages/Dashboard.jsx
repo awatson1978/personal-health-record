@@ -1,3 +1,4 @@
+// meteor-v3/imports/ui/pages/Dashboard.jsx
 import React, { useState, useEffect } from 'react';
 import { useTracker } from 'meteor/react-meteor-data';
 import { Meteor } from 'meteor/meteor';
@@ -39,10 +40,10 @@ import {
   ImportJobs 
 } from '../../api/fhir/collections';
 
-import StatCard from '../components/StatCard';
-import RecentActivity from '../components/RecentActivity';
-import QuickActions from '../components/QuickActions';
-import ImportProgress from '../components/ImportProgress';
+import { StatCard } from '../components/StatCard';
+import { RecentActivity } from '../components/RecentActivity';
+import { QuickActions } from '../components/QuickActions';
+import { ImportProgress } from '../components/ImportProgress';
 
 function Dashboard() {
   const navigate = useNavigate();
@@ -54,7 +55,7 @@ function Dashboard() {
     recentCommunications,
     activeImports,
     isLoading 
-  } = useTracker(() => {
+  } = useTracker(function() {
     const userId = Meteor.userId();
     if (!userId) return { isLoading: true };
 
@@ -108,9 +109,9 @@ function Dashboard() {
   }, []);
 
   // Fetch recent imports on component mount
-  useEffect(() => {
+  useEffect(function() {
     if (Meteor.userId()) {
-      Meteor.call('facebook.getUserImports', (error, result) => {
+      Meteor.call('facebook.getUserImports', function(error, result) {
         if (!error) {
           setRecentImports(result || []);
         }
@@ -124,21 +125,21 @@ function Dashboard() {
       description: 'Upload and process your Facebook export',
       icon: <UploadIcon />,
       color: 'primary',
-      onClick: () => navigate('/import')
+      onClick: function() { navigate('/import'); }
     },
     {
       title: 'View Timeline',
       description: 'Browse your health timeline',
       icon: <TimelineIcon />,
       color: 'secondary',
-      onClick: () => navigate('/timeline')
+      onClick: function() { navigate('/timeline'); }
     },
     {
       title: 'Analytics',
       description: 'View insights and trends',
       icon: <AnalyticsIcon />,
       color: 'success',
-      onClick: () => navigate('/analytics')
+      onClick: function() { navigate('/analytics'); }
     }
   ];
 
@@ -226,9 +227,11 @@ function Dashboard() {
                 <Typography variant="h6" gutterBottom>
                   Import Progress
                 </Typography>
-                {activeImports.map((importJob) => (
-                  <ImportProgress key={importJob._id} job={importJob} />
-                ))}
+                {activeImports.map(function(importJob) {
+                  return (
+                    <ImportProgress key={importJob._id} job={importJob} />
+                  );
+                })}
               </CardContent>
             </Card>
           )}
@@ -260,7 +263,7 @@ function Dashboard() {
                   variant="contained"
                   size="large"
                   startIcon={<UploadIcon />}
-                  onClick={() => navigate('/import')}
+                  onClick={function() { navigate('/import'); }}
                 >
                   Import Facebook Data
                 </Button>
@@ -289,37 +292,39 @@ function Dashboard() {
                   Recent Imports
                 </Typography>
                 <Box>
-                  {recentImports.slice(0, 5).map((importJob) => (
-                    <Box key={importJob._id} sx={{ mb: 2 }}>
-                      <Box display="flex" justifyContent="space-between" alignItems="center">
-                        <Typography variant="body2" noWrap sx={{ flex: 1, mr: 1 }}>
-                          {importJob.filename}
+                  {recentImports.slice(0, 5).map(function(importJob) {
+                    return (
+                      <Box key={importJob._id} sx={{ mb: 2 }}>
+                        <Box display="flex" justifyContent="space-between" alignItems="center">
+                          <Typography variant="body2" noWrap sx={{ flex: 1, mr: 1 }}>
+                            {importJob.filename}
+                          </Typography>
+                          <Chip
+                            label={importJob.status}
+                            size="small"
+                            color={
+                              importJob.status === 'completed' ? 'success' :
+                              importJob.status === 'failed' ? 'error' :
+                              importJob.status === 'processing' ? 'warning' : 'default'
+                            }
+                          />
+                        </Box>
+                        <Typography variant="caption" color="text.secondary">
+                          {moment(importJob.createdAt).format('MMM DD, YYYY HH:mm')}
                         </Typography>
-                        <Chip
-                          label={importJob.status}
-                          size="small"
-                          color={
-                            importJob.status === 'completed' ? 'success' :
-                            importJob.status === 'failed' ? 'error' :
-                            importJob.status === 'processing' ? 'warning' : 'default'
-                          }
-                        />
+                        {importJob.results && (
+                          <Typography variant="caption" display="block" color="text.secondary">
+                            {get(importJob.results, 'communications', 0)} posts, {' '}
+                            {get(importJob.results, 'clinicalImpressions', 0)} health records
+                          </Typography>
+                        )}
                       </Box>
-                      <Typography variant="caption" color="text.secondary">
-                        {moment(importJob.createdAt).format('MMM DD, YYYY HH:mm')}
-                      </Typography>
-                      {importJob.results && (
-                        <Typography variant="caption" display="block" color="text.secondary">
-                          {get(importJob.results, 'communications', 0)} posts, {' '}
-                          {get(importJob.results, 'clinicalImpressions', 0)} health records
-                        </Typography>
-                      )}
-                    </Box>
-                  ))}
+                    );
+                  })}
                 </Box>
                 <Button
                   size="small"
-                  onClick={() => navigate('/import')}
+                  onClick={function() { navigate('/import'); }}
                   sx={{ mt: 1 }}
                 >
                   View All Imports
@@ -339,7 +344,7 @@ function Dashboard() {
           bottom: 16,
           right: 16,
         }}
-        onClick={() => navigate('/import')}
+        onClick={function() { navigate('/import'); }}
       >
         <AddIcon />
       </Fab>

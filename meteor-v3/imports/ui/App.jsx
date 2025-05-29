@@ -1,3 +1,4 @@
+// meteor-v3/imports/ui/App.jsx
 import React, { useState, useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { Meteor } from 'meteor/meteor';
@@ -8,104 +9,109 @@ import { CssBaseline, Box } from '@mui/material';
 import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
 import { AdapterMoment } from '@mui/x-date-pickers/AdapterMoment';
 
-// Components
+// Components - Import directly, not from index
 import Header from './components/Header';
 import Sidebar from './components/Sidebar';
-import LoadingScreen from './components/LoadingScreen';
-import ErrorBoundary from './components/ErrorBoundary';
+import { LoadingScreen } from './components/LoadingScreen';
+import { ErrorBoundary } from './components/ErrorBoundary';
 
-// Pages
+// Pages - Import directly, not from index
 import Dashboard from './pages/Dashboard';
-import Timeline from './pages/Timeline';
+import { Timeline } from './pages/Timeline';
 import Import from './pages/Import';
-import Analytics from './pages/Analytics';
-import Settings from './pages/Settings';
-import Login from './pages/Login';
-import Register from './pages/Register';
+import { Analytics } from './pages/Analytics';
+import { Settings } from './pages/Settings';
+import { Login } from './pages/Login';
+import { Register } from './pages/Register';
 
 // Theme configuration
-const createAppTheme = (mode) => createTheme({
-  palette: {
-    mode,
-    primary: {
-      main: mode === 'dark' ? '#90caf9' : '#1976d2',
+const createAppTheme = function(mode) {
+  return createTheme({
+    palette: {
+      mode,
+      primary: {
+        main: mode === 'dark' ? '#90caf9' : '#1976d2',
+      },
+      secondary: {
+        main: mode === 'dark' ? '#f48fb1' : '#dc004e',
+      },
+      background: {
+        default: mode === 'dark' ? '#121212' : '#f5f5f5',
+        paper: mode === 'dark' ? '#1e1e1e' : '#ffffff',
+      },
+      text: {
+        primary: mode === 'dark' ? '#ffffff' : '#000000',
+        secondary: mode === 'dark' ? '#b0b0b0' : '#666666',
+      }
     },
-    secondary: {
-      main: mode === 'dark' ? '#f48fb1' : '#dc004e',
+    typography: {
+      fontFamily: '"Roboto", "Helvetica", "Arial", sans-serif',
+      h1: {
+        fontSize: '2.5rem',
+        fontWeight: 600,
+      },
+      h2: {
+        fontSize: '2rem',
+        fontWeight: 600,
+      },
+      h3: {
+        fontSize: '1.75rem',
+        fontWeight: 500,
+      },
+      h4: {
+        fontSize: '1.5rem',
+        fontWeight: 500,
+      },
+      h5: {
+        fontSize: '1.25rem',
+        fontWeight: 500,
+      },
+      h6: {
+        fontSize: '1rem',
+        fontWeight: 500,
+      }
     },
-    background: {
-      default: mode === 'dark' ? '#121212' : '#f5f5f5',
-      paper: mode === 'dark' ? '#1e1e1e' : '#ffffff',
-    },
-    text: {
-      primary: mode === 'dark' ? '#ffffff' : '#000000',
-      secondary: mode === 'dark' ? '#b0b0b0' : '#666666',
-    }
-  },
-  typography: {
-    fontFamily: '"Roboto", "Helvetica", "Arial", sans-serif',
-    h1: {
-      fontSize: '2.5rem',
-      fontWeight: 600,
-    },
-    h2: {
-      fontSize: '2rem',
-      fontWeight: 600,
-    },
-    h3: {
-      fontSize: '1.75rem',
-      fontWeight: 500,
-    },
-    h4: {
-      fontSize: '1.5rem',
-      fontWeight: 500,
-    },
-    h5: {
-      fontSize: '1.25rem',
-      fontWeight: 500,
-    },
-    h6: {
-      fontSize: '1rem',
-      fontWeight: 500,
-    }
-  },
-  components: {
-    MuiAppBar: {
-      styleOverrides: {
-        root: {
-          boxShadow: 'none',
-          borderBottom: `1px solid ${mode === 'dark' ? '#333' : '#e0e0e0'}`,
+    components: {
+      MuiAppBar: {
+        styleOverrides: {
+          root: {
+            boxShadow: 'none',
+            borderBottom: `1px solid ${mode === 'dark' ? '#333' : '#e0e0e0'}`,
+          },
+        },
+      },
+      MuiDrawer: {
+        styleOverrides: {
+          paper: {
+            backgroundColor: mode === 'dark' ? '#1e1e1e' : '#ffffff',
+            borderRight: `1px solid ${mode === 'dark' ? '#333' : '#e0e0e0'}`,
+          },
+        },
+      },
+      MuiCard: {
+        styleOverrides: {
+          root: {
+            boxShadow: mode === 'dark' 
+              ? '0 2px 8px rgba(0,0,0,0.3)' 
+              : '0 2px 8px rgba(0,0,0,0.1)',
+          },
         },
       },
     },
-    MuiDrawer: {
-      styleOverrides: {
-        paper: {
-          backgroundColor: mode === 'dark' ? '#1e1e1e' : '#ffffff',
-          borderRight: `1px solid ${mode === 'dark' ? '#333' : '#e0e0e0'}`,
-        },
-      },
-    },
-    MuiCard: {
-      styleOverrides: {
-        root: {
-          boxShadow: mode === 'dark' 
-            ? '0 2px 8px rgba(0,0,0,0.3)' 
-            : '0 2px 8px rgba(0,0,0,0.1)',
-        },
-      },
-    },
-  },
-});
+  });
+};
 
 function App() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [darkMode, setDarkMode] = useState(() => {
-    const saved = localStorage.getItem('facebook-fhir-theme');
-    return saved ? saved === 'dark' : false;
+  const [darkMode, setDarkMode] = useState(function() {
+    if (typeof localStorage !== 'undefined') {
+      const saved = localStorage.getItem('facebook-fhir-theme');
+      return saved ? saved === 'dark' : false;
+    }
+    return false;
   });
 
-  const { user, userLoading } = useTracker(() => {
+  const { user, userLoading } = useTracker(function() {
     const user = Meteor.user();
     const userLoading = !Meteor.userId() && Meteor.loggingIn();
     
@@ -117,15 +123,17 @@ function App() {
 
   const theme = createAppTheme(darkMode ? 'dark' : 'light');
 
-  useEffect(() => {
-    localStorage.setItem('facebook-fhir-theme', darkMode ? 'dark' : 'light');
+  useEffect(function() {
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem('facebook-fhir-theme', darkMode ? 'dark' : 'light');
+    }
   }, [darkMode]);
 
-  const toggleSidebar = () => {
+  const toggleSidebar = function() {
     setSidebarOpen(!sidebarOpen);
   };
 
-  const toggleTheme = () => {
+  const toggleTheme = function() {
     setDarkMode(!darkMode);
   };
 
@@ -154,7 +162,7 @@ function App() {
                   />
                   <Sidebar 
                     open={sidebarOpen}
-                    onClose={() => setSidebarOpen(false)}
+                    onClose={function() { setSidebarOpen(false); }}
                     user={user}
                   />
                 </>
