@@ -1,0 +1,43 @@
+{
+  "public": {
+    "appName": "Facebook FHIR Timeline",
+    "version": "2.0.0",
+    "supportEmail": "support@example.com",
+    "features": {
+      "facebookImport": true,
+      "fhirExport": true,
+      "clinicalAnalysis": true,
+      "dataVisualization": true
+    }
+  },
+  "private": {
+    "database": {
+      "mongodb": {
+        "url": "mongodb://localhost:27017/facebook-fhir"
+      }
+    },
+    "security": {
+      "bcryptRounds": 12,
+      "sessionTimeout": 86400000,
+      "maxUploadSize": 104857600,
+      "allowedFileTypes": [".zip", ".json", ".html"]
+    },
+    "processing": {
+      "maxConcurrentJobs": 5,
+      "chunkSize": 1000,
+      "progressUpdateInterval": 1000
+    },
+    "fhir": {
+      "version": "4.0.1",
+      "baseUrl": "https://hapi.fhir.org/baseR4",
+      "validateResources": true
+    },
+    "nlp": {
+      "clinicalKeywords": [
+        "sick", "pain", "doctor", "hospital", "medication", "surgery",
+        "headache", "fever", "tired", "appointment", "diagnosis", "treatment",
+        "prescription", "symptoms", "illness", "injury", "therapy", "recovery"
+      ]
+    }
+  }
+}

@@ -9,3 +9,5 @@ reports/*
 
 .env
 .gagarin
+
+node_modules

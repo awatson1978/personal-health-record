@@ -1,0 +1,101 @@
+{
+  "name": "facebook-fhir-timeline",
+  "version": "2.0.0",
+  "description": "Convert Facebook data exports into FHIR-compliant personal health timeline",
+  "keywords": ["fhir", "facebook", "health", "timeline", "personal-health-record", "meteor", "react"],
+  "author": "Your Name <your.email@example.com>",
+  "license": "MIT",
+  "private": true,
+  "scripts": {
+    "start": "meteor run --settings settings.json",
+    "dev": "meteor run --port 3000 --settings settings.json",
+    "dev-mobile": "meteor run android-device --mobile-server http://localhost:3000",
+    "build": "meteor build ../output --server-only",
+    "build-mobile": "meteor build ../output --platforms android",
+    "test": "meteor test --once --driver-package meteortesting:mocha --settings settings.json",
+    "test-watch": "meteor test --driver-package meteortesting:mocha --settings settings.json",
+    "lint": "eslint imports/ client/ server/ --ext .js,.jsx",
+    "lint-fix": "eslint imports/ client/ server/ --ext .js,.jsx --fix",
+    "deploy": "meteor deploy facebook-fhir.meteorapp.com --settings settings.json",
+    "reset": "meteor reset && meteor npm install",
+    "update": "meteor update --all-packages"
+  },
+  "dependencies": {
+    "@babel/runtime": "^7.20.0",
+    "meteor-node-stubs": "^1.2.5",
+    
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "react-router-dom": "^6.8.0",
+    
+    "@mui/material": "^5.11.0",
+    "@mui/icons-material": "^5.11.0",
+    "@mui/lab": "^5.0.0-alpha.118",
+    "@mui/x-date-pickers": "^5.0.0",
+    "@emotion/react": "^11.10.5",
+    "@emotion/styled": "^11.10.5",
+    "@emotion/cache": "^11.10.5",
+    
+    "lodash": "^4.17.21",
+    "moment": "^2.29.4",
+    
+    "yauzl": "^2.10.0",
+    "archiver": "^5.3.1",
+    "node-stream-zip": "^1.15.0",
+    
+    "uuid": "^9.0.0",
+    "validator": "^13.7.0",
+    
+    "fhir": "^4.11.1",
+    "fhir-kit-client": "^1.9.0",
+    
+    "recharts": "^2.5.0",
+    "react-virtualized": "^9.22.3",
+    
+    "multer": "^1.4.5-lts.1",
+    "bcrypt": "^5.1.0"
+  },
+  "devDependencies": {
+    "@types/meteor": "^2.9.1",
+    "@types/react": "^18.0.27",
+    "@types/react-dom": "^18.0.10",
+    "@types/lodash": "^4.14.191",
+    "@types/yauzl": "^2.10.0",
+    "@types/uuid": "^9.0.0",
+    "@types/validator": "^13.7.10",
+    
+    "eslint": "^8.33.0",
+    "eslint-plugin-react": "^7.32.2",
+    "eslint-plugin-react-hooks": "^4.6.0",
+    "eslint-plugin-meteor": "^7.3.0",
+    
+    "prettier": "^2.8.3",
+    
+    "chai": "^4.3.7",
+    "mocha": "^10.2.0"
+  },
+  "meteor": {
+    "mainModule": {
+      "client": "client/main.js",
+      "server": "server/main.js"
+    },
+    "testModule": "tests/main.js"
+  },
+  "engines": {
+    "node": ">=18.0.0",
+    "npm": ">=8.0.0"
+  },
+  "browserslist": [
+    "> 1%",
+    "last 2 versions",
+    "not dead"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/yourusername/facebook-fhir-timeline.git"
+  },
+  "bugs": {
+    "url": "https://github.com/yourusername/facebook-fhir-timeline/issues"
+  },
+  "homepage": "https://github.com/yourusername/facebook-fhir-timeline#readme"
+}
