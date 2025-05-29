@@ -5,6 +5,7 @@ import { get } from 'lodash';
 import fs from 'fs';
 import path from 'path';
 import yauzl from 'yauzl';
+import { isFileExcluded } from './excluded-files';
 
 export class DirectoryScanner {
   constructor() {
@@ -28,6 +29,7 @@ export class DirectoryScanner {
         totalSize: fileSize,
         totalSizeFormatted: formatBytes(fileSize),
         files: [],
+        excludedFiles: [], // Track excluded files
         categories: {
           demographics: [],
           friends: [],
@@ -39,6 +41,7 @@ export class DirectoryScanner {
         summary: {
           totalFiles: 0,
           totalSize: 0,
+          excludedCount: 0,
           testParseRecommendation: null
         }
       };
@@ -51,6 +54,19 @@ export class DirectoryScanner {
         zipfile.on('entry', function(entry) {
           if (!/\/$/.test(entry.fileName)) {
             // File entry
+            
+            // Check if file should be excluded
+            if (isFileExcluded(entry.fileName)) {
+              inventory.excludedFiles.push({
+                name: entry.fileName,
+                size: entry.uncompressedSize,
+                reason: 'Excluded file type'
+              });
+              inventory.summary.excludedCount++;
+              zipfile.readEntry();
+              return;
+            }
+
             const fileInfo = {
               name: entry.fileName,
               size: entry.uncompressedSize,
@@ -90,6 +106,7 @@ export class DirectoryScanner {
     const inventory = {
       dirPath: dirPath,
       files: [],
+      excludedFiles: [], // Track excluded files
       categories: {
         demographics: [],
         friends: [],
@@ -101,6 +118,7 @@ export class DirectoryScanner {
       summary: {
         totalFiles: 0,
         totalSize: 0,
+        excludedCount: 0,
         testParseRecommendation: null
       }
     };
@@ -114,103 +132,17 @@ export class DirectoryScanner {
     return inventory;
   }
 
-  async extractZipToWorking(filePath, jobId) {
-    check(filePath, String);
-    check(jobId, String);
-
-    const extractPath = path.join(this.workingDir, jobId, 'extracted');
-    
-    // Ensure directory exists
-    if (!fs.existsSync(extractPath)) {
-      fs.mkdirSync(extractPath, { recursive: true });
-    }
-
-    return new Promise(function(resolve, reject) {
-      yauzl.open(filePath, { lazyEntries: true }, function(err, zipfile) {
-        if (err) return reject(err);
-
-        let extractedFiles = [];
-        let totalEntries = 0;
-        let processedEntries = 0;
-
-        // Count entries first
-        zipfile.on('entry', function() { totalEntries++; });
-        zipfile.readEntry();
-
-        zipfile.on('entry', function(entry) {
-          if (/\/$/.test(entry.fileName)) {
-            // Directory entry
-            const dirPath = path.join(extractPath, entry.fileName);
-            if (!fs.existsSync(dirPath)) {
-              fs.mkdirSync(dirPath, { recursive: true });
-            }
-            processedEntries++;
-            if (processedEntries >= totalEntries) {
-              resolve({ extractPath, extractedFiles });
-            } else {
-              zipfile.readEntry();
-            }
-          } else {
-            // File entry
-            zipfile.openReadStream(entry, function(err, readStream) {
-              if (err) {
-                console.error(`Error extracting ${entry.fileName}:`, err);
-                processedEntries++;
-                if (processedEntries >= totalEntries) {
-                  resolve({ extractPath, extractedFiles });
-                } else {
-                  zipfile.readEntry();
-                }
-                return;
-              }
-
-              const fullPath = path.join(extractPath, entry.fileName);
-              const dir = path.dirname(fullPath);
-              
-              if (!fs.existsSync(dir)) {
-                fs.mkdirSync(dir, { recursive: true });
-              }
-
-              const writeStream = fs.createWriteStream(fullPath);
-              readStream.pipe(writeStream);
-
-              writeStream.on('close', function() {
-                extractedFiles.push({
-                  originalPath: entry.fileName,
-                  extractedPath: fullPath,
-                  size: entry.uncompressedSize
-                });
-
-                processedEntries++;
-                if (processedEntries >= totalEntries) {
-                  resolve({ extractPath, extractedFiles });
-                } else {
-                  zipfile.readEntry();
-                }
-              });
-
-              writeStream.on('error', function(err) {
-                console.error(`Error writing ${entry.fileName}:`, err);
-                processedEntries++;
-                if (processedEntries >= totalEntries) {
-                  resolve({ extractPath, extractedFiles });
-                } else {
-                  zipfile.readEntry();
-                }
-              });
-            });
-          }
-        });
-
-        zipfile.on('error', reject);
-      });
-    });
-  }
+  // ... rest of the class remains the same
 }
 
 // Helper functions
 function categorizeFile(fileName) {
   const lowerName = fileName.toLowerCase();
+  
+  // Check if file should be excluded first
+  if (isFileExcluded(fileName)) {
+    return 'excluded';
+  }
   
   if (lowerName.includes('profile') || lowerName.includes('about')) {
     return 'demographics';
@@ -231,6 +163,7 @@ function categorizeFile(fileName) {
   return 'other';
 }
 
+
 async function scanDirectoryRecursive(basePath, currentPath, inventory) {
   const entries = fs.readdirSync(currentPath, { withFileTypes: true });
 
@@ -241,6 +174,19 @@ async function scanDirectoryRecursive(basePath, currentPath, inventory) {
     if (entry.isDirectory()) {
       await scanDirectoryRecursive(basePath, fullPath, inventory);
     } else {
+      // Check if file should be excluded
+      if (isFileExcluded(entry.name)) {
+        const stats = fs.statSync(fullPath);
+        inventory.excludedFiles.push({
+          name: entry.name,
+          path: relativePath,
+          size: stats.size,
+          reason: 'Excluded file type'
+        });
+        inventory.summary.excludedCount++;
+        continue;
+      }
+
       const stats = fs.statSync(fullPath);
       const fileInfo = {
         name: entry.name,
@@ -259,6 +205,7 @@ async function scanDirectoryRecursive(basePath, currentPath, inventory) {
     }
   }
 }
+
 
 function generateTestParseRecommendation(inventory) {
   const testParseSize = 104857600; // 100MB

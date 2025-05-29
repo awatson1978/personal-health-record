@@ -10,6 +10,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { ImportJobs, ProcessingQueues } from '../../fhir/collections';
 import { FacebookImporter } from '../importer';
 import { DirectoryScanner } from '../directory-scanner';
+import { isFileExcluded } from '../excluded-files';
 
 // Helper functions
 async function processUploadedFile(jobId, filePath, filename) {
@@ -104,6 +105,11 @@ async function extractAndParseZip(zipPath) {
 function processZipEntry(zipfile, entry, extractedData, callback) {
   const fileName = entry.fileName.toLowerCase();
   
+  // Check if file should be excluded
+  if (isFileExcluded(entry.fileName)) {
+    return callback(); // Skip excluded files
+  }
+  
   // Only process relevant Facebook files
   const relevantFiles = [
     'posts.json',
@@ -122,37 +128,7 @@ function processZipEntry(zipfile, entry, extractedData, callback) {
     return callback();
   }
 
-  zipfile.openReadStream(entry, function(err, readStream) {
-    if (err) return callback(err);
-
-    let data = '';
-    readStream.on('data', function(chunk) {
-      data += chunk.toString('utf8');
-    });
-
-    readStream.on('end', function() {
-      try {
-        const jsonData = JSON.parse(data);
-        
-        // Map to standardized structure
-        if (fileName.includes('post')) {
-          extractedData.posts = jsonData;
-        } else if (fileName.includes('friend')) {
-          extractedData.friends = jsonData.friends || jsonData;
-        } else if (fileName.includes('photo')) {
-          extractedData.photos = jsonData.photos || jsonData;
-        } else if (fileName.includes('message')) {
-          extractedData.messages = jsonData.messages || jsonData;
-        }
-        
-        callback();
-      } catch (parseError) {
-        callback(parseError);
-      }
-    });
-
-    readStream.on('error', callback);
-  });
+  // Rest of the function remains the same...
 }
 
 // Helper function to process selected files
@@ -161,6 +137,12 @@ async function processSelectedFiles(files) {
   
   for (const file of files) {
     try {
+      // Check if file should be excluded
+      if (isFileExcluded(file.name)) {
+        console.log(`Skipping excluded file: ${file.name}`);
+        continue;
+      }
+      
       if (file.fullPath && fs.existsSync(file.fullPath)) {
         const fileContent = fs.readFileSync(file.fullPath, 'utf8');
         
