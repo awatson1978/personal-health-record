@@ -24,6 +24,9 @@ import { Settings } from './pages/Settings';
 import { Login } from './pages/Login';
 import { Register } from './pages/Register';
 
+// Constants
+const DRAWER_WIDTH = 240;
+
 // Theme configuration
 const createAppTheme = function(mode) {
   return createTheme({
@@ -129,8 +132,26 @@ function App() {
     }
   }, [darkMode]);
 
+  // Auto-close sidebar on mobile when route changes
+  useEffect(function() {
+    const handleResize = function() {
+      if (window.innerWidth < 960 && sidebarOpen) {
+        setSidebarOpen(false);
+      }
+    };
+
+    window.addEventListener('resize', handleResize);
+    return function() {
+      window.removeEventListener('resize', handleResize);
+    };
+  }, [sidebarOpen]);
+
   const toggleSidebar = function() {
     setSidebarOpen(!sidebarOpen);
+  };
+
+  const closeSidebar = function() {
+    setSidebarOpen(false);
   };
 
   const toggleTheme = function() {
@@ -162,8 +183,9 @@ function App() {
                   />
                   <Sidebar 
                     open={sidebarOpen}
-                    onClose={function() { setSidebarOpen(false); }}
+                    onClose={closeSidebar}
                     user={user}
+                    drawerWidth={DRAWER_WIDTH}
                   />
                 </>
               )}
@@ -172,11 +194,10 @@ function App() {
                 component="main"
                 sx={{
                   flexGrow: 1,
-                  pt: user ? 8 : 0, // Account for header height
-                  pl: user && sidebarOpen ? { sm: 30 } : 0, // Account for sidebar width
-                  transition: 'padding-left 0.3s',
+                  pt: user ? 8 : 0, // Account for header height when logged in
                   minHeight: '100vh',
-                  backgroundColor: 'background.default'
+                  backgroundColor: 'background.default',
+                  width: '100%'
                 }}
               >
                 <Routes>

@@ -1,3 +1,4 @@
+// meteor-v3/imports/ui/components/Sidebar.jsx
 import React from 'react';
 import {
   Drawer,
@@ -19,8 +20,7 @@ import {
   Info as InfoIcon
 } from '@mui/icons-material';
 import { useNavigate, useLocation } from 'react-router-dom';
-
-const drawerWidth = 240;
+import { get } from 'lodash';
 
 const menuItems = [
   { text: 'Dashboard', icon: <DashboardIcon />, path: '/' },
@@ -34,13 +34,16 @@ const secondaryItems = [
   { text: 'About', icon: <InfoIcon />, path: '/about' },
 ];
 
-function Sidebar({ open, onClose, user }) {
+function Sidebar({ open, onClose, user, drawerWidth = 240 }) {
   const navigate = useNavigate();
   const location = useLocation();
 
+  const userName = get(user, 'profile.name', get(user, 'emails.0.address', 'User'));
+
   const handleNavigation = function(path) {
     navigate(path);
-    if (open) onClose(); // Close sidebar on mobile after navigation
+    // Always close sidebar after navigation since it overlays
+    onClose();
   };
 
   const isSelected = function(path) {
@@ -48,27 +51,53 @@ function Sidebar({ open, onClose, user }) {
   };
 
   const drawerContent = (
-    <Box sx={{ overflow: 'auto', height: '100%' }}>
+    <Box sx={{ 
+      overflow: 'auto', 
+      height: '100%',
+      display: 'flex',
+      flexDirection: 'column'
+    }}>
       {/* User Info */}
-      <Box sx={{ p: 2, borderBottom: 1, borderColor: 'divider' }}>
+      <Box sx={{ 
+        p: 2, 
+        borderBottom: 1, 
+        borderColor: 'divider',
+        minHeight: 'auto'
+      }}>
         <Typography variant="h6" noWrap>
           Personal Health
         </Typography>
         <Typography variant="body2" color="text.secondary" noWrap>
-          {user?.emails?.[0]?.address || 'User'}
+          {userName}
         </Typography>
       </Box>
 
       {/* Main Navigation */}
-      <List>
+      <List sx={{ flexGrow: 1 }}>
         {menuItems.map(function(item) {
           return (
             <ListItem key={item.text} disablePadding>
               <ListItemButton
                 selected={isSelected(item.path)}
                 onClick={function() { handleNavigation(item.path); }}
+                sx={{
+                  '&.Mui-selected': {
+                    backgroundColor: 'primary.main',
+                    color: 'primary.contrastText',
+                    '& .MuiListItemIcon-root': {
+                      color: 'primary.contrastText',
+                    },
+                    '&:hover': {
+                      backgroundColor: 'primary.dark',
+                    }
+                  }
+                }}
               >
-                <ListItemIcon>
+                <ListItemIcon
+                  sx={{
+                    color: isSelected(item.path) ? 'inherit' : 'text.primary'
+                  }}
+                >
                   {item.icon}
                 </ListItemIcon>
                 <ListItemText primary={item.text} />
@@ -88,8 +117,24 @@ function Sidebar({ open, onClose, user }) {
               <ListItemButton
                 selected={isSelected(item.path)}
                 onClick={function() { handleNavigation(item.path); }}
+                sx={{
+                  '&.Mui-selected': {
+                    backgroundColor: 'primary.main',
+                    color: 'primary.contrastText',
+                    '& .MuiListItemIcon-root': {
+                      color: 'primary.contrastText',
+                    },
+                    '&:hover': {
+                      backgroundColor: 'primary.dark',
+                    }
+                  }
+                }}
               >
-                <ListItemIcon>
+                <ListItemIcon
+                  sx={{
+                    color: isSelected(item.path) ? 'inherit' : 'text.primary'
+                  }}
+                >
                   {item.icon}
                 </ListItemIcon>
                 <ListItemText primary={item.text} />
@@ -100,7 +145,12 @@ function Sidebar({ open, onClose, user }) {
       </List>
 
       {/* Footer */}
-      <Box sx={{ position: 'absolute', bottom: 0, width: '100%', p: 2 }}>
+      <Box sx={{ 
+        p: 2, 
+        borderTop: 1, 
+        borderColor: 'divider',
+        mt: 'auto'
+      }}>
         <Typography variant="caption" color="text.secondary" align="center" display="block">
           Facebook FHIR Timeline v2.0
         </Typography>
@@ -109,44 +159,26 @@ function Sidebar({ open, onClose, user }) {
   );
 
   return (
-    <Box
-      component="nav"
-      sx={{ width: { sm: drawerWidth }, flexShrink: { sm: 0 } }}
+    <Drawer
+      variant="temporary"
+      anchor="left"
+      open={open}
+      onClose={onClose}
+      ModalProps={{ 
+        keepMounted: true // Better open performance
+      }}
+      sx={{
+        '& .MuiDrawer-paper': { 
+          boxSizing: 'border-box', 
+          width: drawerWidth,
+          top: 64, // Height of the header
+          height: 'calc(100vh - 64px)',
+          zIndex: (theme) => theme.zIndex.drawer
+        },
+      }}
     >
-      {/* Mobile drawer */}
-      <Drawer
-        variant="temporary"
-        open={open}
-        onClose={onClose}
-        ModalProps={{ keepMounted: true }}
-        sx={{
-          display: { xs: 'block', sm: 'none' },
-          '& .MuiDrawer-paper': { 
-            boxSizing: 'border-box', 
-            width: drawerWidth 
-          },
-        }}
-      >
-        {drawerContent}
-      </Drawer>
-
-      {/* Desktop drawer */}
-      <Drawer
-        variant="persistent"
-        open={open}
-        sx={{
-          display: { xs: 'none', sm: 'block' },
-          '& .MuiDrawer-paper': { 
-            boxSizing: 'border-box', 
-            width: drawerWidth,
-            position: 'relative',
-            height: '100vh'
-          },
-        }}
-      >
-        {drawerContent}
-      </Drawer>
-    </Box>
+      {drawerContent}
+    </Drawer>
   );
 }
 
