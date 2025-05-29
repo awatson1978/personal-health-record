@@ -78,8 +78,7 @@
     "mainModule": {
       "client": "client/main.js",
       "server": "server/main.js"
-    },
-    "testModule": "tests/main.js"
+    }
   },
   "engines": {
     "node": ">=18.0.0",
@@ -89,13 +88,5 @@
     "> 1%",
     "last 2 versions",
     "not dead"
-  ],
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/yourusername/facebook-fhir-timeline.git"
-  },
-  "bugs": {
-    "url": "https://github.com/yourusername/facebook-fhir-timeline/issues"
-  },
-  "homepage": "https://github.com/yourusername/facebook-fhir-timeline#readme"
+  ]
 }
