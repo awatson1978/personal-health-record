@@ -60,7 +60,8 @@ import {
   FolderOpen as FolderOpenIcon,
   InsertDriveFile as FileIcon,
   Search as SearchIcon,
-  ExpandMore as ExpandMoreIcon
+  ExpandMore as ExpandMoreIcon,
+  PlayArrow as ProcessIcon
 } from '@mui/icons-material';
 
 import { useNavigate } from 'react-router-dom';
@@ -89,6 +90,7 @@ function Import() {
   const [directoryPath, setDirectoryPath] = useState('');
   const [zipPath, setZipPath] = useState('');
   const [scanning, setScanning] = useState(false);
+  const [processing, setProcessing] = useState(false); // Add processing state
   const [inventory, setInventory] = useState(null);
   const [selectedFiles, setSelectedFiles] = useState([]);
   const [tabValue, setTabValue] = useState(0);
@@ -442,6 +444,9 @@ function Import() {
       return;
     }
 
+    setProcessing(true);
+    setUploadError(null);
+
     try {
       const sourcePath = inventory.dirPath || inventory.filePath;
       
@@ -469,6 +474,8 @@ function Import() {
     } catch (error) {
       console.error('Directory processing error:', error);
       setUploadError(error.reason || 'Failed to start processing. Please try again.');
+    } finally {
+      setProcessing(false);
     }
   };
 
@@ -703,8 +710,104 @@ function Import() {
           </Alert>
         )}
 
-        {/* Rest of the function remains the same */}
-        {/* ... */}
+        {inventory.summary.testParseRecommendation && (
+          <Alert severity="info" sx={{ mb: 2 }}>
+            <AlertTitle>Processing Recommendation</AlertTitle>
+            <Typography variant="body2">
+              {inventory.summary.testParseRecommendation.reason}
+            </Typography>
+          </Alert>
+        )}
+
+        {categories.map(function(category) {
+          const files = get(inventory, `categories.${category}`, []);
+          if (files.length === 0) return null;
+
+          const selectedInCategory = files.filter(function(file) {
+            return selectedFiles.includes(file.path);
+          });
+
+          return (
+            <Accordion key={category} defaultExpanded={category === 'posts' || category === 'friends'}>
+              <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+                <Box display="flex" alignItems="center" justifyContent="space-between" width="100%">
+                  <Typography variant="subtitle1" sx={{ textTransform: 'capitalize' }}>
+                    {category} ({files.length} files)
+                  </Typography>
+                  <Box display="flex" alignItems="center" onClick={function(e) { e.stopPropagation(); }}>
+                    <Typography variant="body2" color="text.secondary" sx={{ mr: 2 }}>
+                      {selectedInCategory.length} selected
+                    </Typography>
+                    <Button
+                      size="small"
+                      onClick={function(e) {
+                        e.stopPropagation();
+                        if (selectedInCategory.length === files.length) {
+                          deselectAllInCategory(category);
+                        } else {
+                          selectAllInCategory(category);
+                        }
+                      }}
+                    >
+                      {selectedInCategory.length === files.length ? 'Deselect All' : 'Select All'}
+                    </Button>
+                  </Box>
+                </Box>
+              </AccordionSummary>
+              <AccordionDetails>
+                <List dense>
+                  {files.map(function(file, index) {
+                    const isSelected = selectedFiles.includes(file.path);
+                    return (
+                      <ListItem
+                        key={index}
+                        button
+                        onClick={function() { toggleFileSelection(file.path); }}
+                        sx={{
+                          bgcolor: isSelected ? 'action.selected' : 'transparent'
+                        }}
+                      >
+                        <ListItemIcon>
+                          <Checkbox
+                            edge="start"
+                            checked={isSelected}
+                            tabIndex={-1}
+                            disableRipple
+                          />
+                        </ListItemIcon>
+                        <ListItemText
+                          primary={file.name}
+                          secondary={file.sizeFormatted}
+                        />
+                      </ListItem>
+                    );
+                  })}
+                </List>
+              </AccordionDetails>
+            </Accordion>
+          );
+        })}
+
+        {/* FIXED: Add Process Button Here */}
+        {selectedFiles.length > 0 && (
+          <Box sx={{ mt: 3 }}>
+            <Alert severity="success" sx={{ mb: 2 }}>
+              <Typography variant="body2">
+                Ready to process {selectedFiles.length} selected files.
+              </Typography>
+            </Alert>
+            <Button
+              variant="contained"
+              size="large"
+              startIcon={processing ? <CircularProgress size={20} color="inherit" /> : <ProcessIcon />}
+              onClick={handleProcessDirectory}
+              disabled={processing || selectedFiles.length === 0}
+              fullWidth
+            >
+              {processing ? 'Processing Files...' : `Process ${selectedFiles.length} Selected Files`}
+            </Button>
+          </Box>
+        )}
       </Box>
     );
   };

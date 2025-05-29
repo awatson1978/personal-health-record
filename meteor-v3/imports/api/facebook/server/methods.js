@@ -12,6 +12,9 @@ import { FacebookImporter } from '../importer';
 import { DirectoryScanner } from '../directory-scanner';
 import { isFileExcluded } from '../excluded-files';
 
+// Track active importers for cancellation
+const activeImporters = new Map();
+
 // Helper functions
 async function processUploadedFile(jobId, filePath, filename) {
   check(jobId, String);
@@ -35,11 +38,17 @@ async function processUploadedFile(jobId, filePath, filename) {
       throw new Meteor.Error('unsupported-format', 'Unsupported file format');
     }
 
-    // Process the data
+    // Create and track importer
     const importer = new FacebookImporter(job.userId, jobId);
+    activeImporters.set(jobId, importer);
+
+    // Process the data
     const results = await importer.processData(facebookData);
 
-    console.log(`Facebook import completed for user ${job.userId}:`, results);
+    // Remove from active importers
+    activeImporters.delete(jobId);
+
+    console.log(`✅ Facebook import completed for user ${job.userId}:`, results);
 
     // Clean up file
     if (fs.existsSync(filePath)) {
@@ -49,7 +58,8 @@ async function processUploadedFile(jobId, filePath, filename) {
     return results;
 
   } catch (error) {
-    console.error('Process file error:', error);
+    console.error('❌ Process file error:', error);
+    activeImporters.delete(jobId);
     throw error;
   }
 }
@@ -128,7 +138,37 @@ function processZipEntry(zipfile, entry, extractedData, callback) {
     return callback();
   }
 
-  // Rest of the function remains the same...
+  zipfile.openReadStream(entry, function(err, readStream) {
+    if (err) return callback(err);
+    
+    let data = '';
+    readStream.on('data', function(chunk) {
+      data += chunk;
+    });
+    
+    readStream.on('end', function() {
+      try {
+        const jsonData = JSON.parse(data);
+        
+        // Categorize data based on filename
+        if (fileName.includes('post')) {
+          extractedData.posts = jsonData;
+        } else if (fileName.includes('friend')) {
+          extractedData.friends = jsonData.friends || jsonData;
+        } else if (fileName.includes('photo')) {
+          extractedData.photos = jsonData.photos || jsonData;
+        } else if (fileName.includes('message')) {
+          extractedData.messages = jsonData.messages || jsonData;
+        }
+        
+        callback();
+      } catch (parseError) {
+        callback(parseError);
+      }
+    });
+    
+    readStream.on('error', callback);
+  });
 }
 
 // Helper function to process selected files
@@ -219,20 +259,24 @@ Meteor.methods({
     }
 
     try {
-      // Create import job
+      // Create import job for browser-selected directory
       const jobId = await ImportJobs.insertAsync({
         userId: this.userId,
         filename: `Directory: ${dirPath}`,
         filePath: dirPath,
         selectedFiles: selectedFiles,
         status: 'pending',
+        totalRecords: selectedFiles.length,
+        processedRecords: 0,
         createdAt: new Date(),
-        processingType: 'directory'
+        processingType: 'browser-directory'
       });
 
+      console.log(`Created browser directory job ${jobId} for user ${this.userId} with ${selectedFiles.length} selected files`);
       return jobId;
+      
     } catch (error) {
-      console.error('Create directory job error:', error);
+      console.error('Create browser directory job error:', error);
       throw new Meteor.Error('job-creation-failed', error.message);
     }
   },
@@ -252,6 +296,11 @@ Meteor.methods({
         throw new Meteor.Error('job-not-found', 'Import job not found');
       }
 
+      // Check if job was cancelled
+      if (job.status === 'cancelled') {
+        return { success: false, error: 'Job was cancelled' };
+      }
+
       // Parse JSON content
       let jsonData;
       try {
@@ -261,48 +310,58 @@ Meteor.methods({
         return { success: false, error: 'Invalid JSON format' };
       }
 
-      // Process the data based on file type
-      const importer = new FacebookImporter(this.userId, jobId);
+      // Create or get existing importer
+      let importer = activeImporters.get(jobId);
+      if (!importer) {
+        importer = new FacebookImporter(this.userId, jobId);
+        activeImporters.set(jobId, importer);
+      }
       
       // Determine data type based on file path
       const fileName = filePath.toLowerCase();
       
-      if (fileName.includes('post')) {
-        if (Array.isArray(jsonData)) {
-          await importer.processPosts(jsonData);
-        } else {
-          await importer.processPosts([jsonData]);
-        }
-      } else if (fileName.includes('friend')) {
-        const friends = jsonData.friends || jsonData;
-        if (Array.isArray(friends)) {
-          await importer.processFriends(friends);
-        }
-      } else if (fileName.includes('photo')) {
-        const photos = jsonData.photos || jsonData;
-        if (Array.isArray(photos)) {
-          await importer.processPhotos(photos);
-        }
-      } else if (fileName.includes('message')) {
-        const messages = jsonData.messages || jsonData;
-        if (Array.isArray(messages)) {
-          await importer.processMessages(messages);
-        }
-      }
-
-      // Update job progress
-      await ImportJobs.updateAsync(
-        { _id: jobId },
-        { 
-          $inc: { processedRecords: 1 },
-          $set: { 
-            status: 'processing',
-            updatedAt: new Date()
+      try {
+        if (fileName.includes('post')) {
+          if (Array.isArray(jsonData)) {
+            await importer.processPosts(jsonData);
+          } else {
+            await importer.processPosts([jsonData]);
+          }
+        } else if (fileName.includes('friend')) {
+          const friends = jsonData.friends || jsonData;
+          if (Array.isArray(friends)) {
+            await importer.processFriends(friends);
+          }
+        } else if (fileName.includes('photo')) {
+          const photos = jsonData.photos || jsonData;
+          if (Array.isArray(photos)) {
+            await importer.processPhotos(photos);
+          }
+        } else if (fileName.includes('message')) {
+          const messages = jsonData.messages || jsonData;
+          if (Array.isArray(messages)) {
+            await importer.processMessages(messages);
           }
         }
-      );
 
-      return { success: true };
+        // Update job progress
+        await ImportJobs.updateAsync(
+          { _id: jobId },
+          { 
+            $inc: { processedRecords: 1 },
+            $set: { 
+              status: 'processing',
+              updatedAt: new Date()
+            }
+          }
+        );
+
+        return { success: true };
+
+      } catch (processingError) {
+        console.error('File processing error:', processingError);
+        throw processingError;
+      }
 
     } catch (error) {
       console.error('Process file content error:', error);
@@ -364,7 +423,6 @@ Meteor.methods({
               ? inventory.files.filter(function(file) { return selectedFiles.includes(file.path); })
               : inventory.files;
               
-            // TODO: Process files in passes (demographics, friends, posts, etc.)
             facebookData = await processSelectedFiles(filesToProcess);
             
           } else if (fs.statSync(filePath).isDirectory()) {
@@ -378,14 +436,21 @@ Meteor.methods({
             facebookData = await processSelectedFiles(filesToProcess);
           }
 
-          // Process the data with FacebookImporter
+          // Create and track importer
           const importer = new FacebookImporter(this.userId, jobId);
+          activeImporters.set(jobId, importer);
+
+          // Process the data with FacebookImporter
           const results = await importer.processData(facebookData);
 
-          console.log(`Facebook processing completed for user ${this.userId}:`, results);
+          // Remove from active importers
+          activeImporters.delete(jobId);
+
+          console.log(`✅ Facebook processing completed for user ${this.userId}:`, results);
 
         } catch (error) {
-          console.error('Error processing from path:', error);
+          console.error('❌ Error processing from path:', error);
+          activeImporters.delete(jobId);
           await ImportJobs.updateAsync(
             { _id: jobId },
             { 
@@ -457,7 +522,7 @@ Meteor.methods({
         try {
           await processUploadedFile(jobId, filePath, filename);
         } catch (error) {
-          console.error('Error processing uploaded file:', error);
+          console.error('❌ Error processing uploaded file:', error);
           await ImportJobs.updateAsync(
             { _id: jobId },
             { 
@@ -534,31 +599,6 @@ Meteor.methods({
     return jobs;
   },
 
-  async 'facebook.deleteImport'(jobId) {
-    check(jobId, String);
-    
-    if (!this.userId) {
-      throw new Meteor.Error('not-authorized', 'Must be logged in');
-    }
-
-    const job = await ImportJobs.findOneAsync({ 
-      _id: jobId, 
-      userId: this.userId 
-    });
-
-    if (!job) {
-      throw new Meteor.Error('job-not-found', 'Import job not found');
-    }
-
-    // Can only delete completed or failed jobs
-    if (job.status === 'processing') {
-      throw new Meteor.Error('job-active', 'Cannot delete active import job');
-    }
-
-    await ImportJobs.removeAsync({ _id: jobId });
-    return true;
-  },
-
   async 'facebook.clearAllData'() {
     if (!this.userId) {
       throw new Meteor.Error('not-authorized', 'Must be logged in');
@@ -587,6 +627,31 @@ Meteor.methods({
         queueItems: await ProcessingQueues.find({ userId: this.userId }).countAsync()
       };
 
+      // Cancel any active imports
+      const activeJobs = await ImportJobs.find({ 
+        userId: this.userId, 
+        status: { $in: ['pending', 'processing'] } 
+      }).fetchAsync();
+
+      for (const job of activeJobs) {
+        const importer = activeImporters.get(job._id);
+        if (importer) {
+          importer.stop();
+          activeImporters.delete(job._id);
+        }
+        
+        await ImportJobs.updateAsync(
+          { _id: job._id },
+          { 
+            $set: {
+              status: 'cancelled',
+              completedAt: new Date(),
+              updatedAt: new Date()
+            }
+          }
+        );
+      }
+
       // Remove all user data
       const deletePromises = [
         Patients.removeAsync({ userId: this.userId }),
@@ -601,7 +666,7 @@ Meteor.methods({
 
       await Promise.all(deletePromises);
 
-      console.log(`Cleared all data for user ${this.userId}:`, beforeCounts);
+      console.log(`✅ Cleared all data for user ${this.userId}:`, beforeCounts);
 
       return {
         success: true,
@@ -610,11 +675,12 @@ Meteor.methods({
       };
 
     } catch (error) {
-      console.error(`Error clearing data for user ${this.userId}:`, error);
+      console.error(`❌ Error clearing data for user ${this.userId}:`, error);
       throw new Meteor.Error('clear-data-failed', error.message);
     }
   },
 
+  // FIXED: Improved cancel method
   async 'facebook.cancelImport'(jobId) {
     check(jobId, String);
     
@@ -635,6 +701,18 @@ Meteor.methods({
       throw new Meteor.Error('job-completed', 'Cannot cancel completed job');
     }
 
+    if (job.status === 'cancelled') {
+      throw new Meteor.Error('job-already-cancelled', 'Job is already cancelled');
+    }
+
+    // Stop the active importer if it exists
+    const importer = activeImporters.get(jobId);
+    if (importer) {
+      importer.stop();
+      activeImporters.delete(jobId);
+      console.log(`🛑 Stopped active importer for job ${jobId}`);
+    }
+
     // Update job status to cancelled
     await ImportJobs.updateAsync(
       { _id: jobId },
@@ -651,7 +729,7 @@ Meteor.methods({
     // Remove any pending queue items
     await ProcessingQueues.removeAsync({ jobId: jobId });
 
-    console.log(`Cancelled import job ${jobId} by user ${this.userId}`);
+    console.log(`✅ Cancelled import job ${jobId} by user ${this.userId}`);
     return true;
   },
 
@@ -682,6 +760,7 @@ Meteor.methods({
         $set: {
           status: 'pending',
           progress: 0,
+          processedRecords: 0,
           errors: [],
           errorCount: 0,
           startedAt: null,
@@ -693,7 +772,7 @@ Meteor.methods({
       }
     );
 
-    console.log(`Retrying import job ${jobId} (attempt ${(job.retryCount || 0) + 1})`);
+    console.log(`🔄 Retrying import job ${jobId} (attempt ${(job.retryCount || 0) + 1})`);
     
     // Note: In a production system, you'd trigger the background processor here
     // For now, we'll just update the status and let the user re-upload
@@ -701,6 +780,7 @@ Meteor.methods({
     return true;
   },
 
+  // FIXED: Improved delete method
   async 'facebook.deleteImport'(jobId) {
     check(jobId, String);
     
@@ -717,21 +797,29 @@ Meteor.methods({
       throw new Meteor.Error('job-not-found', 'Import job not found');
     }
 
-    // Can only delete completed, failed, or cancelled jobs
+    // FIXED: Allow deletion of any job, but cancel it first if needed
     if (job.status === 'processing' || job.status === 'pending') {
-      throw new Meteor.Error('job-active', 'Cannot delete active import job. Cancel it first.');
+      // Cancel first, then delete
+      const importer = activeImporters.get(jobId);
+      if (importer) {
+        importer.stop();
+        activeImporters.delete(jobId);
+      }
+      
+      console.log(`🛑 Cancelling active job ${jobId} before deletion`);
     }
 
-    // Note: This does NOT delete the imported data (Communications, ClinicalImpressions, etc.)
-    // It only deletes the import job record itself for cleanup
-    // The imported data remains in the system
-    
+    // Remove the job record (this does NOT delete the imported data)
     await ImportJobs.removeAsync({ _id: jobId });
-    console.log(`Deleted import job record ${jobId} (data remains)`);
+    
+    // Remove any related queue items
+    await ProcessingQueues.removeAsync({ jobId: jobId });
+    
+    console.log(`✅ Deleted import job record ${jobId} (imported data remains)`);
     
     return {
       success: true,
-      message: 'Import job record deleted. Your imported data remains in the system.',
+      message: 'Import job deleted. Your imported data remains in the system.',
       jobId: jobId
     };
   },
@@ -756,68 +844,62 @@ Meteor.methods({
       job: job,
       canCancel: job.status === 'processing' || job.status === 'pending',
       canRetry: job.status === 'failed' || job.status === 'cancelled',
-      canDelete: job.status === 'completed' || job.status === 'failed' || job.status === 'cancelled'
+      canDelete: true, // FIXED: Always allow delete
+      isActive: activeImporters.has(jobId)
     };
   },
 
-   async 'facebook.createDirectoryJob'(dirPath, selectedFiles) {
-    check(dirPath, String);
-    check(selectedFiles, [String]);
+  // FIXED: Force complete stuck jobs
+  async 'facebook.forceCompleteJob'(jobId) {
+    check(jobId, String);
     
     if (!this.userId) {
-      throw new Meteor.Error('not-authorized', 'Must be logged in to create jobs');
+      throw new Meteor.Error('not-authorized', 'Must be logged in');
     }
 
-    try {
-      // Create import job for browser-selected directory
-      const jobId = await ImportJobs.insertAsync({
-        userId: this.userId,
-        filename: `Directory: ${dirPath}`,
-        filePath: dirPath,
-        selectedFiles: selectedFiles,
-        status: 'pending',
-        totalRecords: selectedFiles.length,
-        processedRecords: 0,
-        createdAt: new Date(),
-        processingType: 'browser-directory'
-      });
+    const job = await ImportJobs.findOneAsync({ 
+      _id: jobId, 
+      userId: this.userId 
+    });
 
-      console.log(`Created browser directory job ${jobId} for user ${this.userId} with ${selectedFiles.length} files`);
-      return jobId;
-      
-    } catch (error) {
-      console.error('Create browser directory job error:', error);
-      throw new Meteor.Error('job-creation-failed', error.message);
+    if (!job) {
+      throw new Meteor.Error('job-not-found', 'Import job not found');
     }
-  },
-   async 'facebook.createDirectoryJob'(dirPath, selectedFiles) {
-    check(dirPath, String);
-    check(selectedFiles, [String]);
+
+    // Stop any active importer
+    const importer = activeImporters.get(jobId);
+    if (importer) {
+      importer.stop();
+      activeImporters.delete(jobId);
+    }
+
+    // Force complete the job
+    await ImportJobs.updateAsync(
+      { _id: jobId },
+      { 
+        $set: {
+          status: 'completed',
+          progress: 100,
+          completedAt: new Date(),
+          updatedAt: new Date(),
+          results: job.results || {
+            patients: 0,
+            communications: 0,
+            clinicalImpressions: 0,
+            media: 0,
+            persons: 0,
+            careTeams: 0
+          }
+        }
+      }
+    );
+
+    console.log(`✅ Force completed stuck job ${jobId}`);
     
-    if (!this.userId) {
-      throw new Meteor.Error('not-authorized', 'Must be logged in to create jobs');
-    }
-
-    try {
-      // Create import job for browser-selected directory
-      const jobId = await ImportJobs.insertAsync({
-        userId: this.userId,
-        filename: `Directory: ${dirPath}`,
-        filePath: dirPath,
-        selectedFiles: selectedFiles,
-        status: 'pending',
-        totalRecords: selectedFiles.length, // Use selected files count
-        processedRecords: 0,
-        createdAt: new Date(),
-        processingType: 'browser-directory'
-      });
-
-      console.log(`Created browser directory job ${jobId} for user ${this.userId} with ${selectedFiles.length} selected files`);
-      return jobId;
-      
-    } catch (error) {
-      console.error('Create browser directory job error:', error);
-      throw new Meteor.Error('job-creation-failed', error.message);
-    }
+    return {
+      success: true,
+      message: 'Job marked as completed',
+      jobId: jobId
+    };
   }
 });
