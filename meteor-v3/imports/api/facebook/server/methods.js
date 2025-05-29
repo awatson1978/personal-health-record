@@ -582,29 +582,55 @@ Meteor.methods({
       throw new Meteor.Error('not-authorized', 'Must be logged in');
     }
 
-    // Import collections
-    const { 
-      Patients, 
-      Communications, 
-      ClinicalImpressions, 
-      Media, 
-      Persons, 
-      CareTeams 
-    } = await import('../../fhir/collections');
+    try {
+      // Import collections
+      const { 
+        Patients, 
+        Communications, 
+        ClinicalImpressions, 
+        Media, 
+        Persons, 
+        CareTeams 
+      } = await import('../../fhir/collections');
 
-    // Remove all user data
-    await Promise.all([
-      Patients.removeAsync({ userId: this.userId }),
-      Communications.removeAsync({ userId: this.userId }),
-      ClinicalImpressions.removeAsync({ userId: this.userId }),
-      Media.removeAsync({ userId: this.userId }),
-      Persons.removeAsync({ userId: this.userId }),
-      CareTeams.removeAsync({ userId: this.userId }),
-      ImportJobs.removeAsync({ userId: this.userId }),
-      ProcessingQueues.removeAsync({ userId: this.userId })
-    ]);
+      // Get counts before deletion for reporting
+      const beforeCounts = {
+        patients: await Patients.find({ userId: this.userId }).countAsync(),
+        communications: await Communications.find({ userId: this.userId }).countAsync(),
+        clinicalImpressions: await ClinicalImpressions.find({ userId: this.userId }).countAsync(),
+        media: await Media.find({ userId: this.userId }).countAsync(),
+        persons: await Persons.find({ userId: this.userId }).countAsync(),
+        careTeams: await CareTeams.find({ userId: this.userId }).countAsync(),
+        importJobs: await ImportJobs.find({ userId: this.userId }).countAsync(),
+        queueItems: await ProcessingQueues.find({ userId: this.userId }).countAsync()
+      };
 
-    return true;
+      // Remove all user data
+      const deletePromises = [
+        Patients.removeAsync({ userId: this.userId }),
+        Communications.removeAsync({ userId: this.userId }),
+        ClinicalImpressions.removeAsync({ userId: this.userId }),
+        Media.removeAsync({ userId: this.userId }),
+        Persons.removeAsync({ userId: this.userId }),
+        CareTeams.removeAsync({ userId: this.userId }),
+        ImportJobs.removeAsync({ userId: this.userId }),
+        ProcessingQueues.removeAsync({ userId: this.userId })
+      ];
+
+      await Promise.all(deletePromises);
+
+      console.log(`Cleared all data for user ${this.userId}:`, beforeCounts);
+
+      return {
+        success: true,
+        deletedCounts: beforeCounts,
+        message: 'All imported data has been cleared successfully'
+      };
+
+    } catch (error) {
+      console.error(`Error clearing data for user ${this.userId}:`, error);
+      throw new Meteor.Error('clear-data-failed', error.message);
+    }
   },
 
   async 'facebook.cancelImport'(jobId) {

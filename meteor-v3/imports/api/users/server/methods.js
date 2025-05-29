@@ -22,6 +22,7 @@ Meteor.methods({
       'tablet', 'capsule', 'dose', 'dosage', 'side effect', 'reaction'
     ]);
 
+    console.log(`Returning ${defaultKeywords.length} default clinical keywords`);
     return defaultKeywords;
   },
 
@@ -90,6 +91,7 @@ Meteor.methods({
       }
     );
 
+    console.log(`Reset settings to defaults for user ${this.userId}`);
     return defaultSettings;
   }
 });

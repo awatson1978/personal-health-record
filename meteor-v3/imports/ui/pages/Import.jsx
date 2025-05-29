@@ -42,7 +42,8 @@ import {
   Accordion,
   AccordionSummary,
   AccordionDetails,
-  CircularProgress
+  CircularProgress,
+  Snackbar
 } from '@mui/material';
 
 import {
@@ -79,6 +80,8 @@ function Import() {
   const [uploadError, setUploadError] = useState(null);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [selectedJob, setSelectedJob] = useState(null);
+  const [deleting, setDeleting] = useState(false);
+  const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'success' });
   
   // Directory scanning states
   const [importMode, setImportMode] = useState('upload'); // 'upload' or 'directory'
@@ -570,19 +573,59 @@ function Import() {
     });
   };
 
-  const handleDeleteImport = async function(jobId) {
+  // FIXED: Updated delete handler
+  const handleDeleteImport = async function() {
+    if (!selectedJob) return;
+    
+    console.log('Deleting import job:', selectedJob._id);
+    setDeleting(true);
+    
     try {
-      await new Promise(function(resolve, reject) {
-        Meteor.call('facebook.deleteImport', jobId, function(error, result) {
-          if (error) reject(error);
-          else resolve(result);
+      const result = await new Promise(function(resolve, reject) {
+        Meteor.call('facebook.deleteImport', selectedJob._id, function(error, result) {
+          if (error) {
+            console.error('Delete error:', error);
+            reject(error);
+          } else {
+            console.log('Delete success:', result);
+            resolve(result);
+          }
         });
       });
+
+      // Show success message
+      setSnackbar({
+        open: true,
+        message: 'Import job deleted successfully',
+        severity: 'success'
+      });
+
       setDeleteDialogOpen(false);
       setSelectedJob(null);
+      
     } catch (error) {
-      console.error('Delete error:', error);
+      console.error('Delete import error:', error);
+      setSnackbar({
+        open: true,
+        message: `Failed to delete import: ${error.reason || error.message}`,
+        severity: 'error'
+      });
+    } finally {
+      setDeleting(false);
     }
+  };
+
+  // FIXED: Updated delete button click handler
+  const handleDeleteClick = function(job, event) {
+    event.preventDefault();
+    event.stopPropagation();
+    console.log('Delete button clicked for job:', job._id);
+    setSelectedJob(job);
+    setDeleteDialogOpen(true);
+  };
+
+  const closeSnackbar = function() {
+    setSnackbar({ ...snackbar, open: false });
   };
 
   const getStatusColor = function(status) {
@@ -1093,15 +1136,17 @@ function Import() {
                             <IconButton
                               edge="end"
                               size="small"
-                              onClick={function() {
-                                setSelectedJob(job);
-                                setDeleteDialogOpen(true);
-                              }}
+                              onClick={function(event) { handleDeleteClick(job, event); }}
                               aria-label="delete import"
                               color="error"
                               sx={{ ml: 1, marginTop: '-5px' }}
+                              disabled={deleting}
                             >
-                              <DeleteIcon />
+                              {deleting && selectedJob?._id === job._id ? (
+                                <CircularProgress size={20} />
+                              ) : (
+                                <DeleteIcon />
+                              )}
                             </IconButton>
                           </Box>
                         </ListItemSecondaryAction>
@@ -1116,29 +1161,61 @@ function Import() {
         </Grid>
       </Grid>
 
-      {/* Delete Confirmation Dialog */}
+      {/* FIXED: Delete Confirmation Dialog */}
       <Dialog
         open={deleteDialogOpen}
-        onClose={function() { setDeleteDialogOpen(false); }}
+        onClose={function() { 
+          if (!deleting) {
+            setDeleteDialogOpen(false);
+            setSelectedJob(null);
+          }
+        }}
       >
-        <DialogTitle>Delete Import</DialogTitle>
+        <DialogTitle>Delete Import Job</DialogTitle>
         <DialogContent>
           <Typography>
-            Are you sure you want to delete the import "{selectedJob?.filename}"?
-            This action cannot be undone.
+            Are you sure you want to delete the import job "{selectedJob?.filename}"?
+          </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+            This will only delete the job record. Your imported data (communications, health records, etc.) will remain in the system.
           </Typography>
         </DialogContent>
         <DialogActions>
-          <Button onClick={function() { setDeleteDialogOpen(false); }}>Cancel</Button>
           <Button 
-            onClick={function() { handleDeleteImport(selectedJob?._id); }}
+            onClick={function() { 
+              setDeleteDialogOpen(false); 
+              setSelectedJob(null);
+            }}
+            disabled={deleting}
+          >
+            Cancel
+          </Button>
+          <Button 
+            onClick={handleDeleteImport}
             color="error"
             variant="contained"
+            disabled={deleting}
+            startIcon={deleting ? <CircularProgress size={16} /> : null}
           >
-            Delete
+            {deleting ? 'Deleting...' : 'Delete Job'}
           </Button>
         </DialogActions>
       </Dialog>
+
+      {/* Success/Error Snackbar */}
+      <Snackbar
+        open={snackbar.open}
+        autoHideDuration={4000}
+        onClose={closeSnackbar}
+      >
+        <Alert 
+          onClose={closeSnackbar} 
+          severity={snackbar.severity}
+          sx={{ width: '100%' }}
+        >
+          {snackbar.message}
+        </Alert>
+      </Snackbar>
     </Container>
   );
 }

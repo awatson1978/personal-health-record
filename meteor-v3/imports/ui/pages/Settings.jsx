@@ -1,6 +1,7 @@
 // meteor-v3/imports/ui/pages/Settings.jsx
 import React, { useState, useEffect } from 'react';
 import { Meteor } from 'meteor/meteor';
+import { Session } from 'meteor/session';
 import { get, set } from 'lodash';
 import {
   Container,
@@ -20,13 +21,18 @@ import {
   Button,
   Chip,
   Divider,
-  IconButton
+  IconButton,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions
 } from '@mui/material';
 import {
   Add as AddIcon,
   Delete as DeleteIcon,
   Save as SaveIcon,
-  Refresh as RefreshIcon
+  Refresh as RefreshIcon,
+  Warning as WarningIcon
 } from '@mui/icons-material';
 
 export function Settings() {
@@ -43,6 +49,8 @@ export function Settings() {
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saveMessage, setSaveMessage] = useState('');
+  const [clearDataDialogOpen, setClearDataDialogOpen] = useState(false);
+  const [clearingData, setClearingData] = useState(false);
 
   useEffect(function() {
     loadSettings();
@@ -62,8 +70,12 @@ export function Settings() {
       // Load default clinical keywords from server settings
       const defaultKeywords = await new Promise(function(resolve, reject) {
         Meteor.call('settings.getDefaultClinicalKeywords', function(error, keywords) {
-          if (error) reject(error);
-          else resolve(keywords || []);
+          if (error) {
+            console.error('Error loading default keywords:', error);
+            reject(error);
+          } else {
+            resolve(keywords || []);
+          }
         });
       });
       
@@ -185,21 +197,31 @@ export function Settings() {
   };
 
   const clearAllData = async function() {
-    if (confirm('Delete ALL your imported data? This cannot be undone and will remove all communications, clinical impressions, and media.')) {
-      try {
-        await new Promise(function(resolve, reject) {
-          Meteor.call('facebook.clearAllData', function(error, result) {
-            if (error) reject(error);
-            else resolve(result);
-          });
+    setClearingData(true);
+    
+    try {
+      const result = await new Promise(function(resolve, reject) {
+        Meteor.call('facebook.clearAllData', function(error, result) {
+          if (error) reject(error);
+          else resolve(result);
         });
-        
-        setSaveMessage('All data cleared successfully!');
-        
-      } catch (error) {
-        console.error('Clear data error:', error);
-        setSaveMessage('Error clearing data: ' + (error.reason || error.message));
-      }
+      });
+      
+      setSaveMessage('All data cleared successfully!');
+      
+      // FIXED: Reset the import process state in Session
+      Session.set('import.activeStep', 0);
+      
+      // Close dialog
+      setClearDataDialogOpen(false);
+      
+      console.log('Data cleared:', result);
+      
+    } catch (error) {
+      console.error('Clear data error:', error);
+      setSaveMessage('Error clearing data: ' + (error.reason || error.message));
+    } finally {
+      setClearingData(false);
     }
   };
 
@@ -290,8 +312,9 @@ export function Settings() {
                 <Button
                   variant="outlined"
                   color="error"
-                  onClick={clearAllData}
+                  onClick={function() { setClearDataDialogOpen(true); }}
                   fullWidth
+                  startIcon={<WarningIcon />}
                 >
                   Clear All Imported Data
                 </Button>
@@ -426,6 +449,54 @@ export function Settings() {
           </Card>
         </Grid>
       </Grid>
+
+      {/* FIXED: Clear Data Confirmation Dialog */}
+      <Dialog
+        open={clearDataDialogOpen}
+        onClose={function() { 
+          if (!clearingData) {
+            setClearDataDialogOpen(false);
+          }
+        }}
+      >
+        <DialogTitle>
+          <Box display="flex" alignItems="center">
+            <WarningIcon color="error" sx={{ mr: 1 }} />
+            Clear All Imported Data
+          </Box>
+        </DialogTitle>
+        <DialogContent>
+          <Typography paragraph>
+            Are you sure you want to delete <strong>ALL</strong> your imported data? This will remove:
+          </Typography>
+          <Typography component="ul" sx={{ pl: 2 }}>
+            <li>All communications (social media posts)</li>
+            <li>All clinical impressions (health records)</li>
+            <li>All media files</li>
+            <li>All import jobs and processing history</li>
+            <li>All persons and care teams</li>
+          </Typography>
+          <Typography paragraph color="error.main" sx={{ mt: 2 }}>
+            <strong>This action cannot be undone!</strong>
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button 
+            onClick={function() { setClearDataDialogOpen(false); }}
+            disabled={clearingData}
+          >
+            Cancel
+          </Button>
+          <Button 
+            onClick={clearAllData}
+            color="error"
+            variant="contained"
+            disabled={clearingData}
+          >
+            {clearingData ? 'Clearing Data...' : 'Clear All Data'}
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Container>
   );
 }
