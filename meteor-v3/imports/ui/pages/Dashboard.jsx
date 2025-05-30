@@ -183,18 +183,6 @@ function Dashboard() {
         </Typography>
       </Box>
 
-      {/* FIXED: Add debug info card with corrected mappings */}
-      {Meteor.isDevelopment && (
-        <Alert severity="info" sx={{ mb: 3 }}>
-          <Typography variant="body2">
-            <strong>Corrected FHIR Mappings:</strong> Communications: {stats.totalCommunications} (from messages), 
-            Clinical Impressions: {stats.totalClinicalImpressions} (from posts), 
-            Media: {stats.totalMedia} (from photos), 
-            Persons: {stats.totalPersons} (from friends)
-          </Typography>
-        </Alert>
-      )}
-
       {/* Active Imports Alert */}
       {activeImports.length > 0 && (
         <Alert severity="info" sx={{ mb: 3 }}>
@@ -217,7 +205,7 @@ function Dashboard() {
         </Grid>
         <Grid item xs={12} sm={6} md={3}>
           <StatCard
-            title="Clinical Records"
+            title="Clinical Impressions"
             value={stats.totalClinicalImpressions}
             icon={<HealthIcon />}
             color="error"
