@@ -61,8 +61,8 @@ function Dashboard() {
 
     // Subscribe to user data with higher limits
     const patientsHandle = Meteor.subscribe('user.patients');
-    const communicationsHandle = Meteor.subscribe('user.communications', 50); // Increased limit
-    const clinicalHandle = Meteor.subscribe('user.clinicalImpressions', 50); // Increased limit
+    const communicationsHandle = Meteor.subscribe('user.communications', 50);
+    const clinicalHandle = Meteor.subscribe('user.clinicalImpressions', 50);
     const mediaHandle = Meteor.subscribe('user.media', 20);
     const importsHandle = Meteor.subscribe('user.imports');
 
@@ -74,23 +74,35 @@ function Dashboard() {
 
     if (isLoading) return { isLoading: true };
 
-    // Get statistics - these should show full counts
+    // FIXED: Get statistics using reactive methods instead of async
+    // This data comes from publications/subscriptions and is reactive
+    const allCommunications = Communications.find({ userId }).fetch();
+    const allClinicalImpressions = ClinicalImpressions.find({ userId }).fetch();
+    const allMedia = Media.find({ userId }).fetch();
+    const allImports = ImportJobs.find({ userId, status: 'completed' }).fetch();
+
     const stats = {
-      totalCommunications: Communications.find({ userId }).count(),
-      totalClinicalImpressions: ClinicalImpressions.find({ userId }).count(),
-      totalMedia: Media.find({ userId }).count(),
-      totalImports: ImportJobs.find({ userId, status: 'completed' }).count()
+      totalCommunications: allCommunications.length,
+      totalClinicalImpressions: allClinicalImpressions.length,
+      totalMedia: allMedia.length,
+      totalImports: allImports.length
     };
+
+    // FIXED: Debug logging to see what data we have
+    console.log('📊 Dashboard stats:', stats);
+    console.log('📊 Sample communications:', allCommunications.slice(0, 2));
+    console.log('📊 Sample clinical impressions:', allClinicalImpressions.slice(0, 2));
+    console.log('📊 Sample media:', allMedia.slice(0, 2));
 
     // Get recent data for display
     const recentClinicalImpressions = ClinicalImpressions.find(
       { userId },
-      { sort: { date: -1 }, limit: 20 } // Show more recent items
+      { sort: { date: -1 }, limit: 20 }
     ).fetch();
 
     const recentCommunications = Communications.find(
       { userId },
-      { sort: { sent: -1 }, limit: 20 } // Show more recent items
+      { sort: { sent: -1 }, limit: 20 }
     ).fetch();
 
     // Get active imports
@@ -153,7 +165,7 @@ function Dashboard() {
     );
   }
 
-  const hasData = stats.totalCommunications > 0 || stats.totalClinicalImpressions > 0;
+  const hasData = stats.totalCommunications > 0 || stats.totalClinicalImpressions > 0 || stats.totalMedia > 0;
 
   return (
     <Container maxWidth="xl" sx={{ mt: 4, mb: 4 }}>
@@ -166,6 +178,15 @@ function Dashboard() {
           Welcome back! Here's your health data overview.
         </Typography>
       </Box>
+
+      {/* FIXED: Add debug info card in development */}
+      {Meteor.isDevelopment && (
+        <Alert severity="info" sx={{ mb: 3 }}>
+          <Typography variant="body2">
+            Debug: Communications: {stats.totalCommunications}, Clinical: {stats.totalClinicalImpressions}, Media: {stats.totalMedia}
+          </Typography>
+        </Alert>
+      )}
 
       {/* Active Imports Alert */}
       {activeImports.length > 0 && (
@@ -325,7 +346,8 @@ function Dashboard() {
                         {importJob.results && (
                           <Typography variant="caption" display="block" color="text.secondary">
                             {get(importJob.results, 'communications', 0)} posts, {' '}
-                            {get(importJob.results, 'clinicalImpressions', 0)} health records
+                            {get(importJob.results, 'clinicalImpressions', 0)} health records, {' '}
+                            {get(importJob.results, 'media', 0)} media files
                           </Typography>
                         )}
                       </Box>

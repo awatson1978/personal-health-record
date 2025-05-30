@@ -1,3 +1,4 @@
+// meteor-v3/imports/api/users/server/publications.js
 import { Meteor } from 'meteor/meteor';
 import { check } from 'meteor/check';
 import { 
@@ -17,20 +18,36 @@ Meteor.publish('user.patients', function() {
   return Patients.find({ userId: this.userId });
 });
 
-Meteor.publish('user.communications', function(limit = 50) {
-  check(limit, Number);
+// FIXED: Make communications publication more flexible
+Meteor.publish('user.communications', function(limit = null) {
+  if (limit !== null) {
+    check(limit, Number);
+  }
   
   if (!this.userId) {
     return this.ready();
   }
 
-  return Communications.find(
-    { userId: this.userId },
-    { 
-      sort: { sent: -1 },
-      limit: Math.min(limit, 200) // Cap at 200 for performance
-    }
-  );
+  const options = { 
+    sort: { sent: -1 }
+  };
+  
+  // Only apply limit if specifically requested
+  if (limit !== null && limit > 0) {
+    options.limit = Math.min(limit, 1000); // Higher cap for flexibility
+  }
+
+  return Communications.find({ userId: this.userId }, options);
+});
+
+// FIXED: Add unlimited communications publication for dashboard stats
+Meteor.publish('user.communications.all', function() {
+  if (!this.userId) {
+    return this.ready();
+  }
+
+  // Return all communications for accurate counting
+  return Communications.find({ userId: this.userId });
 });
 
 Meteor.publish('user.communications.recent', function() {
@@ -47,20 +64,34 @@ Meteor.publish('user.communications.recent', function() {
   );
 });
 
-Meteor.publish('user.clinicalImpressions', function(limit = 50) {
-  check(limit, Number);
+// FIXED: Make clinical impressions more flexible
+Meteor.publish('user.clinicalImpressions', function(limit = null) {
+  if (limit !== null) {
+    check(limit, Number);
+  }
   
   if (!this.userId) {
     return this.ready();
   }
 
-  return ClinicalImpressions.find(
-    { userId: this.userId },
-    { 
-      sort: { date: -1 },
-      limit: Math.min(limit, 200)
-    }
-  );
+  const options = { 
+    sort: { date: -1 }
+  };
+  
+  if (limit !== null && limit > 0) {
+    options.limit = Math.min(limit, 1000);
+  }
+
+  return ClinicalImpressions.find({ userId: this.userId }, options);
+});
+
+// FIXED: Add unlimited clinical impressions publication
+Meteor.publish('user.clinicalImpressions.all', function() {
+  if (!this.userId) {
+    return this.ready();
+  }
+
+  return ClinicalImpressions.find({ userId: this.userId });
 });
 
 Meteor.publish('user.clinicalImpressions.recent', function() {
@@ -77,20 +108,34 @@ Meteor.publish('user.clinicalImpressions.recent', function() {
   );
 });
 
-Meteor.publish('user.media', function(limit = 50) {
-  check(limit, Number);
+// FIXED: Make media more flexible
+Meteor.publish('user.media', function(limit = null) {
+  if (limit !== null) {
+    check(limit, Number);
+  }
   
   if (!this.userId) {
     return this.ready();
   }
 
-  return Media.find(
-    { userId: this.userId },
-    { 
-      sort: { createdDateTime: -1 },
-      limit: Math.min(limit, 100)
-    }
-  );
+  const options = { 
+    sort: { createdDateTime: -1 }
+  };
+  
+  if (limit !== null && limit > 0) {
+    options.limit = Math.min(limit, 500);
+  }
+
+  return Media.find({ userId: this.userId }, options);
+});
+
+// FIXED: Add unlimited media publication
+Meteor.publish('user.media.all', function() {
+  if (!this.userId) {
+    return this.ready();
+  }
+
+  return Media.find({ userId: this.userId });
 });
 
 Meteor.publish('user.media.recent', function() {
@@ -147,4 +192,20 @@ Meteor.publish('import.job', function(jobId) {
     _id: jobId, 
     userId: this.userId 
   });
+});
+
+// FIXED: Add publications for accurate counting
+Meteor.publish('user.counts', function() {
+  if (!this.userId) {
+    return this.ready();
+  }
+
+  // This is a special publication that just ensures all user data is available
+  // for counting without limits
+  return [
+    Patients.find({ userId: this.userId }),
+    Communications.find({ userId: this.userId }),
+    ClinicalImpressions.find({ userId: this.userId }),
+    Media.find({ userId: this.userId })
+  ];
 });
