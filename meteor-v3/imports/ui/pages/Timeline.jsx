@@ -162,15 +162,15 @@ export function Timeline() {
     return function() { clearTimeout(timeoutId); };
   }, [filters.searchQuery]);
 
-  // Handle date range changes
-  useEffect(function() {
-    if (filters.dateRange.start || filters.dateRange.end) {
-      if (Meteor.userId()) {
-        loadTimelineData(1);
-        setPage(1);
-      }
-    }
-  }, [filters.dateRange.start, filters.dateRange.end]);
+  // DISABLED: Date range handling
+  // useEffect(function() {
+  //   if (filters.dateRange.start || filters.dateRange.end) {
+  //     if (Meteor.userId()) {
+  //       loadTimelineData(1);
+  //       setPage(1);
+  //     }
+  //   }
+  // }, [filters.dateRange.start, filters.dateRange.end]);
 
   // Handle pagination
   const handlePageChange = function(event, newPage) {
@@ -492,7 +492,8 @@ export function Timeline() {
                 </Select>
               </FormControl>
 
-              {/* Date Range - FIXED DatePicker implementation */}
+              {/* DISABLED: Date Range Controls */}
+              {/*
               <Typography variant="subtitle2" sx={{ mb: 1 }}>
                 Date Range
               </Typography>
@@ -528,6 +529,7 @@ export function Timeline() {
                   }
                 }}
               />
+              */}
 
               {/* Sort Options */}
               <FormControl fullWidth sx={{ mb: 1 }}>
