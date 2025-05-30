@@ -36,11 +36,23 @@ Meteor.methods({
 
     try {
       const page = get(options, 'page', 1);
-      const limit = Math.min(get(options, 'limit', 25), 10000); // FIXED: Cap at 10000 instead of 100
+      // FIXED: Remove the 10K cap and allow up to 1M records for exports
+      const requestedLimit = get(options, 'limit', 25);
+      const limit = Math.min(requestedLimit, 1000000); // Cap at 1M instead of 10K
       const filters = get(options, 'filters', {});
       const skip = (page - 1) * limit;
 
-      console.log(`📊 Getting timeline data for user ${this.userId}:`, { page, limit, filters });
+      console.log(`📊 Getting timeline data for user ${this.userId}:`, { 
+        page, 
+        requestedLimit, 
+        actualLimit: limit,
+        filters 
+      });
+
+      // If this is a large request, log it for monitoring
+      if (limit > 50000) {
+        console.log(`⚠️ Large timeline request: ${limit} records for user ${this.userId}`);
+      }
 
       // Build aggregation pipeline
       let pipeline = [];
@@ -236,7 +248,12 @@ Meteor.methods({
         return cleanItem;
       });
 
-      console.log(`✅ Timeline data retrieved: ${cleanedItems.length} items (page ${page}/${Math.ceil(totalCount / limit)}), total available: ${totalCount}`);
+      // Log large dataset processing
+      if (totalCount > 50000) {
+        console.log(`📊 Large dataset processed: returning ${cleanedItems.length} items (page ${page}), total available: ${totalCount}`);
+      } else {
+        console.log(`✅ Timeline data retrieved: ${cleanedItems.length} items (page ${page}/${Math.ceil(totalCount / limit)}), total available: ${totalCount}`);
+      }
 
       return {
         items: cleanedItems,
@@ -253,6 +270,7 @@ Meteor.methods({
     }
   },
 
+  // ... rest of the methods remain the same
   async 'timeline.exportData'(filters = {}) {
     check(filters, {
       dateRange: Match.Optional({
@@ -275,7 +293,7 @@ Meteor.methods({
       // Get all timeline data (no pagination for export)
       const result = await Meteor.call('timeline.getData', {
         page: 1,
-        limit: 10000, // Large limit for export
+        limit: 1000000, // Use 1M limit for exports
         filters: filters
       });
 
@@ -316,6 +334,7 @@ Meteor.methods({
     }
   },
 
+  // ... other methods remain the same but continue here for completeness
   async 'timeline.getDateRange'() {
     if (!this.userId) {
       throw new Meteor.Error('not-authorized', 'Must be logged in');

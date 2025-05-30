@@ -41,41 +41,40 @@ Meteor.methods({
       const format = get(options, 'format', 'bundle');
       const includeMetadata = get(options, 'includeMetadata', true);
       const resourceTypes = get(options, 'resourceTypes', ['all']);
-      
-      // ENHANCED: Support much larger preview limits, with intelligent server-side capping
-      let previewLimit = get(options, 'previewLimit', 1000);
-      
-      // Cap the server-side processing to prevent server overload
-      // Client can display more by slicing the returned data
-      const maxServerLimit = 100000; // 100K server-side cap
-      const serverLimit = Math.min(previewLimit, maxServerLimit);
+      const previewLimit = get(options, 'previewLimit', 1000);
       
       console.log(`📊 Generating export preview for user ${this.userId}:`, { 
         filters, 
         format, 
         resourceTypes, 
-        requestedLimit: previewLimit,
-        serverLimit: serverLimit
+        previewLimit
       });
 
-      // ENHANCED: Use the serverLimit for timeline data retrieval
+      // FIXED: Use the preview limit directly - no server-side capping
       const timelineResult = await Meteor.call('timeline.getData', {
         page: 1,
-        limit: serverLimit, // Use server-safe limit
+        limit: previewLimit, // Use exactly what was requested
         filters: filters
       });
 
-      console.log(`📊 SERVER: timeline.getData returned ${timelineResult.items?.length || 0} items (requested: ${previewLimit}, server limit: ${serverLimit})`);
+      console.log(`📊 SERVER: timeline.getData returned:`, {
+        itemsLength: timelineResult.items?.length || 0,
+        totalCount: timelineResult.totalCount,
+        requestedLimit: previewLimit,
+        debug: timelineResult.debug
+      });
 
       // Filter by resource types if specified
       let filteredItems = timelineResult.items;
       if (!resourceTypes.includes('all')) {
+        const originalLength = filteredItems.length;
         filteredItems = timelineResult.items.filter(function(item) {
           return resourceTypes.includes(item.resourceType);
         });
+        console.log(`📊 SERVER: Resource type filtering: ${originalLength} → ${filteredItems.length} items`);
       }
 
-      console.log(`📊 SERVER: After resource type filtering: ${filteredItems.length} items`);
+      console.log(`📊 SERVER: Final items for preview generation: ${filteredItems.length}`);
 
       // Generate export data based on format
       let exportData;
@@ -92,20 +91,20 @@ Meteor.methods({
       // Add summary information
       const summary = {
         totalResources: filteredItems.length,
+        totalAvailableInDb: timelineResult.totalCount,
         resourceCounts: {},
         generatedAt: new Date(),
         format: format,
         preview: true,
-        requestedLimit: previewLimit, // What client requested
-        serverLimit: serverLimit, // What server processed
-        actualTotal: timelineResult.totalCount, // Total available in database
-        serverItemsReturned: timelineResult.items?.length || 0,
-        timelineLimit: serverLimit,
-        // ENHANCED: Add performance warnings
+        requestedLimit: previewLimit,
+        actualReturned: filteredItems.length,
+        timelineDebug: timelineResult.debug,
+        // Performance info
         performanceInfo: {
           isLargeDataset: filteredItems.length > 10000,
-          serverLimited: previewLimit > maxServerLimit,
-          maxServerLimit: maxServerLimit
+          databaseTotal: timelineResult.totalCount,
+          previewComplete: filteredItems.length === timelineResult.totalCount,
+          limitApplied: filteredItems.length < timelineResult.totalCount
         }
       };
 
@@ -120,11 +119,11 @@ Meteor.methods({
         summary: summary
       };
 
-      console.log(`✅ Export preview generated: ${filteredItems.length} resources (requested: ${previewLimit}, server processed: ${serverLimit}, total available: ${timelineResult.totalCount})`);
+      console.log(`✅ Export preview generated: ${filteredItems.length} resources (DB total: ${timelineResult.totalCount})`);
       
-      // ENHANCED: Log performance warnings if applicable
-      if (previewLimit > maxServerLimit) {
-        console.log(`⚠️ Client requested ${previewLimit} resources but server capped at ${maxServerLimit} for performance`);
+      // Log if we're showing less than what's available
+      if (filteredItems.length < timelineResult.totalCount) {
+        console.log(`⚠️ Preview limited: showing ${filteredItems.length} of ${timelineResult.totalCount} total records`);
       }
       
       return result;
@@ -166,51 +165,23 @@ Meteor.methods({
 
       console.log(`📥 Generating full export for user ${this.userId}:`, { filters, format, resourceTypes });
 
-      // ENHANCED: For downloads, we can use larger limits but still need to be reasonable
-      // Use multiple passes if needed for very large datasets
-      const maxDownloadLimit = 1000000; // 1M limit for downloads
-      
-      // Get timeline data in batches if needed
-      let allItems = [];
-      let page = 1;
-      const batchSize = 50000; // Process in 50K chunks
-      let hasMore = true;
-      
-      while (hasMore && allItems.length < maxDownloadLimit) {
-        const timelineResult = await Meteor.call('timeline.getData', {
-          page: page,
-          limit: Math.min(batchSize, maxDownloadLimit - allItems.length),
-          filters: filters
-        });
-        
-        if (timelineResult.items && timelineResult.items.length > 0) {
-          allItems = allItems.concat(timelineResult.items);
-          console.log(`📥 Downloaded batch ${page}: ${timelineResult.items.length} items, total: ${allItems.length}`);
-          
-          // Check if we have more data
-          hasMore = timelineResult.items.length === batchSize && 
-                   timelineResult.totalCount > allItems.length &&
-                   allItems.length < maxDownloadLimit;
-          page++;
-        } else {
-          hasMore = false;
-        }
-        
-        // Safety check to prevent infinite loops
-        if (page > 100) {
-          console.warn('⚠️ Reached maximum page limit (100) during download');
-          break;
-        }
-      }
+      // FIXED: Use an effectively unlimited number to get everything
+      const timelineResult = await Meteor.call('timeline.getData', {
+        page: 1,
+        limit: 99999999, // Effectively unlimited for downloads
+        filters: filters
+      });
 
-      console.log(`📥 Total items collected for download: ${allItems.length}`);
+      console.log(`📥 Download: timeline.getData returned ${timelineResult.items?.length || 0} items out of ${timelineResult.totalCount} total`);
 
       // Filter by resource types if specified
-      let filteredItems = allItems;
+      let filteredItems = timelineResult.items;
       if (!resourceTypes.includes('all')) {
-        filteredItems = allItems.filter(function(item) {
+        const originalLength = filteredItems.length;
+        filteredItems = timelineResult.items.filter(function(item) {
           return resourceTypes.includes(item.resourceType);
         });
+        console.log(`📥 Resource type filtering: ${originalLength} → ${filteredItems.length} items`);
       }
 
       console.log(`📥 Final filtered items for download: ${filteredItems.length}`);
@@ -230,13 +201,13 @@ Meteor.methods({
       // Add download metadata
       if (exportData.summary) {
         exportData.summary.downloadInfo = {
-          totalBatches: page - 1,
-          maxDownloadLimit: maxDownloadLimit,
-          limitReached: filteredItems.length >= maxDownloadLimit
+          totalRequested: timelineResult.totalCount,
+          totalReturned: filteredItems.length,
+          downloadComplete: filteredItems.length === timelineResult.totalCount
         };
       }
 
-      console.log(`✅ Full export generated: ${filteredItems.length} resources in ${page - 1} batches`);
+      console.log(`✅ Full export generated: ${filteredItems.length} resources`);
       return exportData;
 
     } catch (error) {
@@ -282,17 +253,16 @@ Meteor.methods({
         { id: 'Person', name: 'Persons', description: 'Friends and contacts' },
         { id: 'CareTeam', name: 'Care Teams', description: 'Support networks' }
       ],
-      // ENHANCED: Add limits information
+      // FIXED: Reflect the reality - no artificial limits
       limits: {
-        previewMaxClient: 1000000, // 1M client-side display limit
-        previewMaxServer: 100000,  // 100K server-side processing limit
-        downloadMax: 1000000,      // 1M download limit
-        batchSize: 50000           // 50K batch size for large downloads
+        previewMaxClient: 10000000, // 10M client-side display limit (very high)
+        previewMaxServer: 10000000,  // 10M server-side processing limit (very high)
+        downloadMax: 10000000,      // 10M download limit (very high)
+        recommendedPreview: 10000   // Recommended preview size for performance
       }
     };
   },
 
-  // ENHANCED: New method to get performance recommendations
   async 'export.getPerformanceRecommendations'(estimatedResourceCount) {
     check(estimatedResourceCount, Number);
 
@@ -311,27 +281,20 @@ Meteor.methods({
       recommendations.optimalPreviewSize = estimatedResourceCount;
       recommendations.recommendations.push('Full dataset preview recommended - small dataset size');
     } else if (estimatedResourceCount <= 10000) {
-      recommendations.optimalPreviewSize = Math.min(estimatedResourceCount, 5000);
+      recommendations.optimalPreviewSize = estimatedResourceCount;
       recommendations.warningLevel = 'low';
-      recommendations.recommendations.push('Consider previewing first 5,000 records for optimal performance');
+      recommendations.recommendations.push('Dataset size is reasonable for full preview');
     } else if (estimatedResourceCount <= 100000) {
-      recommendations.optimalPreviewSize = 10000;
+      recommendations.optimalPreviewSize = estimatedResourceCount; // Show all
       recommendations.warningLevel = 'medium';
-      recommendations.recommendations.push('Large dataset detected - preview limited to 10,000 records recommended');
-      recommendations.recommendations.push('Full dataset available in download');
-    } else if (estimatedResourceCount <= 1000000) {
-      recommendations.optimalPreviewSize = 10000;
-      recommendations.warningLevel = 'high';
-      recommendations.recommendations.push('Very large dataset - strongly recommend limiting preview to 10,000 records');
+      recommendations.recommendations.push('Large dataset - full preview may take some time to render');
       recommendations.recommendations.push('Consider using NDJSON format for better performance');
-      recommendations.recommendations.push('Download may take several minutes');
     } else {
-      recommendations.optimalPreviewSize = 10000;
-      recommendations.warningLevel = 'critical';
-      recommendations.recommendations.push('Extremely large dataset detected');
-      recommendations.recommendations.push('Preview strongly limited to 10,000 records');
-      recommendations.recommendations.push('Download will be processed in batches');
-      recommendations.recommendations.push('Consider applying filters to reduce dataset size');
+      recommendations.optimalPreviewSize = 100000;
+      recommendations.warningLevel = 'high';
+      recommendations.recommendations.push('Very large dataset - consider limiting preview to 100,000 records');
+      recommendations.recommendations.push('Use NDJSON format for better performance');
+      recommendations.recommendations.push('Download will include all data regardless of preview limit');
     }
 
     return recommendations;
@@ -341,6 +304,8 @@ Meteor.methods({
 // Helper functions for different export formats
 
 async function generateBundlePreview(items, includeMetadata, userId) {
+  console.log(`📊 generateBundlePreview: Starting with ${items.length} items`);
+  
   const bundle = {
     resourceType: 'Bundle',
     id: `preview-bundle-${Date.now()}`,
@@ -363,12 +328,12 @@ async function generateBundlePreview(items, includeMetadata, userId) {
     };
   }
 
-  // ENHANCED: Add performance monitoring for large datasets
+  // Add performance monitoring for large datasets
   if (items.length > 10000) {
     console.log(`⚠️ Processing large bundle with ${items.length} items - this may take some time`);
   }
 
-  // Add resources to bundle with progress logging for large sets
+  // FIXED: Process ALL items without any hidden limits
   items.forEach(function(item, index) {
     const resource = cleanResourceForExport(item, includeMetadata);
     
@@ -383,14 +348,18 @@ async function generateBundlePreview(items, includeMetadata, userId) {
     }
   });
 
+  console.log(`📊 generateBundlePreview: Completed with ${bundle.entry.length} entries`);
+  
   if (items.length > 10000) {
-    console.log(`✅ Completed bundle generation with ${items.length} items`);
+    console.log(`✅ Completed bundle generation with ${bundle.entry.length} items`);
   }
 
   return { bundle };
 }
 
 async function generateBundleExport(items, includeMetadata, userId) {
+  console.log(`📥 generateBundleExport: Starting with ${items.length} items`);
+  
   // Same as preview but with download-specific metadata
   const result = await generateBundlePreview(items, includeMetadata, userId);
   
@@ -398,17 +367,21 @@ async function generateBundleExport(items, includeMetadata, userId) {
     result.bundle.meta.source = 'Facebook FHIR Timeline - Download';
   }
   
+  console.log(`📥 generateBundleExport: Completed with ${result.bundle.entry.length} entries`);
   return result;
 }
 
 async function generateNDJSONPreview(items, includeMetadata) {
-  // ENHANCED: Add performance monitoring for large datasets
+  console.log(`📊 generateNDJSONPreview: Starting with ${items.length} items`);
+  
+  // Add performance monitoring for large datasets
   if (items.length > 10000) {
     console.log(`⚠️ Processing large NDJSON with ${items.length} items - this may take some time`);
   }
 
   const resources = [];
   
+  // FIXED: Process ALL items without any hidden limits
   items.forEach(function(item, index) {
     resources.push(cleanResourceForExport(item, includeMetadata));
     
@@ -418,8 +391,10 @@ async function generateNDJSONPreview(items, includeMetadata) {
     }
   });
 
+  console.log(`📊 generateNDJSONPreview: Completed with ${resources.length} resources`);
+
   if (items.length > 10000) {
-    console.log(`✅ Completed NDJSON generation with ${items.length} items`);
+    console.log(`✅ Completed NDJSON generation with ${resources.length} items`);
   }
 
   return {
@@ -434,23 +409,29 @@ async function generateNDJSONPreview(items, includeMetadata) {
 }
 
 async function generateNDJSONExport(items, includeMetadata) {
+  console.log(`📥 generateNDJSONExport: Starting with ${items.length} items`);
+  
   const result = await generateNDJSONPreview(items, includeMetadata);
   
   if (result.metadata) {
     result.metadata.source = 'Facebook FHIR Timeline - Download';
   }
   
+  console.log(`📥 generateNDJSONExport: Completed with ${result.resources.length} resources`);
   return result;
 }
 
 async function generateIndividualResourcesPreview(items, includeMetadata) {
-  // ENHANCED: Add performance monitoring for large datasets
+  console.log(`📊 generateIndividualResourcesPreview: Starting with ${items.length} items`);
+  
+  // Add performance monitoring for large datasets
   if (items.length > 10000) {
     console.log(`⚠️ Processing large individual resources with ${items.length} items - this may take some time`);
   }
 
   const resourcesByType = {};
   
+  // FIXED: Process ALL items without any hidden limits
   items.forEach(function(item, index) {
     const type = item.resourceType;
     if (!resourcesByType[type]) {
@@ -465,8 +446,15 @@ async function generateIndividualResourcesPreview(items, includeMetadata) {
     }
   });
 
+  // Count total processed
+  const totalProcessed = Object.values(resourcesByType).reduce(function(sum, arr) {
+    return sum + arr.length;
+  }, 0);
+
+  console.log(`📊 generateIndividualResourcesPreview: Completed with ${totalProcessed} resources across ${Object.keys(resourcesByType).length} types`);
+
   if (items.length > 10000) {
-    console.log(`✅ Completed individual resources generation with ${items.length} items across ${Object.keys(resourcesByType).length} resource types`);
+    console.log(`✅ Completed individual resources generation with ${totalProcessed} items across ${Object.keys(resourcesByType).length} resource types`);
   }
 
   const result = {
@@ -479,7 +467,7 @@ async function generateIndividualResourcesPreview(items, includeMetadata) {
       exportedAt: new Date().toISOString(),
       source: 'Facebook FHIR Timeline - Preview',
       resourceTypes: Object.keys(resourcesByType),
-      totalResources: items.length,
+      totalResources: totalProcessed,
       resourceTypeBreakdown: {}
     };
 
@@ -493,12 +481,19 @@ async function generateIndividualResourcesPreview(items, includeMetadata) {
 }
 
 async function generateIndividualResourcesExport(items, includeMetadata) {
+  console.log(`📥 generateIndividualResourcesExport: Starting with ${items.length} items`);
+  
   const result = await generateIndividualResourcesPreview(items, includeMetadata);
   
   if (result.metadata) {
     result.metadata.source = 'Facebook FHIR Timeline - Download';
   }
   
+  const totalProcessed = Object.values(result.resources).reduce(function(sum, arr) {
+    return sum + arr.length;
+  }, 0);
+  
+  console.log(`📥 generateIndividualResourcesExport: Completed with ${totalProcessed} resources`);
   return result;
 }
 

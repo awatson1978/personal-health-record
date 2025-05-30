@@ -1,5 +1,5 @@
 // meteor-v3/imports/ui/pages/ExportPreview.jsx
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Meteor } from 'meteor/meteor';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { get } from 'lodash';
@@ -89,7 +89,7 @@ export function ExportPreview() {
   const [debugInfo, setDebugInfo] = useState(null);
   const [performanceWarningShown, setPerformanceWarningShown] = useState(false);
   
-  // FIXED: Export settings with proper state management
+  // FIXED: Export settings with no artificial client-side limits
   const [exportSettings, setExportSettings] = useState({
     format: 'ndjson',
     prettyPrint: true,
@@ -98,7 +98,7 @@ export function ExportPreview() {
     fontSize: 14,
     wordWrap: false,
     resourceTypes: ['all'],
-    displayRows: 1000
+    displayRows: 10000 // Default to 10K but allow much higher
   });
 
   // Filename state
@@ -110,35 +110,37 @@ export function ExportPreview() {
   const [performanceDialogOpen, setPerformanceDialogOpen] = useState(false);
   const [pendingDisplayRows, setPendingDisplayRows] = useState(null);
 
-  // Get display options with performance warnings
+  // FIXED: Get display options with much higher limits and no arbitrary caps
   const getDisplayRowsOptions = function() {
     return [
       { value: 50, label: '50 rows', performance: 'fast' },
       { value: 100, label: '100 rows', performance: 'fast' },
-      { value: 200, label: '200 rows', performance: 'fast' },
       { value: 500, label: '500 rows', performance: 'fast' },
       { value: 1000, label: '1000 rows', performance: 'fast' },
-      { value: 5000, label: '5000 rows', performance: 'moderate' },
-      { value: 10000, label: '10,000 rows', performance: 'slow' },
-      { value: 100000, label: '100,000 rows', performance: 'very-slow' },
+      { value: 5000, label: '5000 rows', performance: 'fast' },
+      { value: 10000, label: '10,000 rows', performance: 'moderate' },
+      { value: 25000, label: '25,000 rows', performance: 'moderate' },
+      { value: 50000, label: '50,000 rows', performance: 'slow' },
+      { value: 100000, label: '100,000 rows', performance: 'slow' },
+      { value: 250000, label: '250,000 rows', performance: 'very-slow' },
+      { value: 500000, label: '500,000 rows', performance: 'very-slow' },
       { value: 1000000, label: '1,000,000 rows', performance: 'extremely-slow' },
-      { value: -1, label: 'All rows', performance: 'extremely-slow' }
+      { value: -1, label: 'All rows (no limit)', performance: 'extremely-slow' }
     ];
   };
 
   // Get performance info for a given row count
   const getPerformanceInfo = function(rowCount) {
-    if (rowCount === -1) return { level: 'extremely-slow', warning: 'May cause browser to freeze with large datasets' };
-    if (rowCount >= 1000000) return { level: 'extremely-slow', warning: 'Very large dataset - may take 30+ seconds to render' };
+    if (rowCount === -1) return { level: 'extremely-slow', warning: 'May cause browser to freeze with very large datasets' };
+    if (rowCount >= 500000) return { level: 'extremely-slow', warning: 'Very large dataset - may take 60+ seconds to render' };
     if (rowCount >= 100000) return { level: 'very-slow', warning: 'Large dataset - may take 10+ seconds to render' };
-    if (rowCount >= 10000) return { level: 'slow', warning: 'May take a few seconds to render' };
-    if (rowCount >= 5000) return { level: 'moderate', warning: 'Moderate rendering time' };
+    if (rowCount >= 50000) return { level: 'slow', warning: 'May take a few seconds to render' };
+    if (rowCount >= 10000) return { level: 'moderate', warning: 'Moderate rendering time' };
     return { level: 'fast', warning: null };
   };
 
   // Handle display rows change with performance warning
   const handleDisplayRowsChange = function(newValue) {
-    console.log('🔍 DEBUG: handleDisplayRowsChange called with:', newValue);
     const performanceInfo = getPerformanceInfo(newValue);
     
     // Show warning for slow performance options
@@ -151,14 +153,12 @@ export function ExportPreview() {
     }
     
     // Apply the change immediately for fast options
-    console.log('🔍 DEBUG: Applying displayRows change immediately:', newValue);
     handleSettingChange('displayRows', newValue);
   };
 
   // Confirm performance warning and apply setting
   const confirmPerformanceChange = function() {
     if (pendingDisplayRows !== null) {
-      console.log('🔍 DEBUG: Confirming performance change to:', pendingDisplayRows);
       handleSettingChange('displayRows', pendingDisplayRows);
       setPerformanceWarningShown(true);
       setPerformanceDialogOpen(false);
@@ -168,7 +168,6 @@ export function ExportPreview() {
 
   // Cancel performance warning
   const cancelPerformanceChange = function() {
-    console.log('🔍 DEBUG: Cancelling performance change');
     setPerformanceDialogOpen(false);
     setPendingDisplayRows(null);
   };
@@ -213,8 +212,8 @@ export function ExportPreview() {
         
         console.log('🔍 DEBUG: We have data, calling export.generatePreview...');
         
-        // Calculate server limit based on displayRows, capped at reasonable server limits
-        const serverLimit = exportSettings.displayRows === -1 ? 50000 : Math.min(exportSettings.displayRows, 50000);
+        // FIXED: Use a very large server limit to match what the server can handle
+        const serverLimit = exportSettings.displayRows === -1 ? 10000000 : Math.min(exportSettings.displayRows, 10000000);
         console.log('🔍 DEBUG: Using server limit:', serverLimit, 'for displayRows:', exportSettings.displayRows);
         
         const result = await new Promise(function(resolve, reject) {
@@ -223,7 +222,7 @@ export function ExportPreview() {
             format: exportSettings.format,
             includeMetadata: exportSettings.includeMetadata,
             resourceTypes: exportSettings.resourceTypes,
-            previewLimit: serverLimit
+            previewLimit: serverLimit // Use the large server limit
           }, function(error, result) {
             if (error) {
               console.error('🔍 DEBUG: Error in export.generatePreview:', error);
@@ -271,7 +270,7 @@ export function ExportPreview() {
     } else {
       console.log('🔍 DEBUG: No user ID, skipping load');
     }
-  }, [Meteor.userId(), exportSettings.format, exportSettings.includeMetadata, exportSettings.resourceTypes, exportSettings.displayRows]);
+  }, [Meteor.userId(), exportSettings.format, exportSettings.includeMetadata, exportSettings.resourceTypes]);
 
   // Update filename when format changes
   useEffect(function() {
@@ -280,16 +279,14 @@ export function ExportPreview() {
     setFilename(baseFilename + extension);
   }, [exportSettings.format]);
 
-  // FIXED: Handle export setting changes with proper logging
+  // Handle export setting changes
   const handleSettingChange = function(key, value) {
-    console.log('🔍 DEBUG: Setting change:', key, '=', value);
+    console.log('🔍 DEBUG: Setting change:', key, value);
     setExportSettings(function(prev) {
-      const newSettings = {
+      return {
         ...prev,
         [key]: value
       };
-      console.log('🔍 DEBUG: New export settings:', newSettings);
-      return newSettings;
     });
   };
 
@@ -387,13 +384,8 @@ export function ExportPreview() {
     }
   };
 
-  // FIXED: Optimized useMemo with proper dependency array and better structure
-  const { displayData, actualDisplayedRows, debugInfo: displayDebugInfo } = useMemo(function() {
-    console.log('🔍 DEBUG: useMemo recalculating with displayRows:', exportSettings.displayRows);
-    console.log('🔍 DEBUG: useMemo exportData available:', !!exportData);
-    console.log('🔍 DEBUG: useMemo exportSettings.format:', exportSettings.format);
-    console.log('🔍 DEBUG: useMemo exportSettings.prettyPrint:', exportSettings.prettyPrint);
-    
+  // FIXED: Completely rewritten useMemo to handle large datasets properly
+  const { displayData, actualDisplayedRows, debugInfo: displayDebugInfo } = React.useMemo(function() {
     if (!exportData) {
       return {
         displayData: '// No export data available\n// Debug info below:\n' + 
@@ -404,15 +396,29 @@ export function ExportPreview() {
     }
     
     try {
-      // Use displayRows for client-side limiting
-      const maxRows = exportSettings.displayRows === -1 ? Infinity : exportSettings.displayRows;
-      console.log('🔍 DEBUG: Client-side limiting with maxRows:', maxRows, 'format:', exportSettings.format);
-      console.log('🔍 DEBUG: exportData keys:', Object.keys(exportData));
-      console.log('🔍 DEBUG: exportData.summary:', exportData.summary);
+      console.log('🔍 MEMO: Processing display data with settings:', {
+        displayRows: exportSettings.displayRows,
+        format: exportSettings.format,
+        prettyPrint: exportSettings.prettyPrint
+      });
+      
+      console.log('🔍 MEMO: Export data structure:', {
+        keys: Object.keys(exportData),
+        summaryTotalResources: exportData.summary?.totalResources,
+        bundleEntryLength: exportData.bundle?.entry?.length,
+        resourcesType: Array.isArray(exportData.resources) ? 'array' : typeof exportData.resources,
+        resourcesLength: Array.isArray(exportData.resources) ? exportData.resources.length : 
+                        exportData.resources ? Object.keys(exportData.resources).length : 0
+      });
+      
+      // FIXED: Determine the effective limit - use -1 for unlimited
+      const effectiveLimit = exportSettings.displayRows === -1 ? Infinity : exportSettings.displayRows;
+      console.log('🔍 MEMO: Effective limit:', effectiveLimit);
       
       let actualRows = 0;
       let totalAvailableResources = 0;
       let processedStructure = '';
+      let resultData = '';
       
       if (exportSettings.format === 'ndjson') {
         // NDJSON format - each resource on its own line
@@ -421,9 +427,11 @@ export function ExportPreview() {
         if (exportData.bundle && exportData.bundle.entry) {
           totalAvailableResources = exportData.bundle.entry.length;
           processedStructure = 'bundle.entry';
-          console.log('🔍 DEBUG: Processing bundle.entry with', totalAvailableResources, 'items');
+          console.log('🔍 MEMO: Processing bundle.entry with', totalAvailableResources, 'items, limit:', effectiveLimit);
           
-          for (let i = 0; i < exportData.bundle.entry.length && actualRows < maxRows; i++) {
+          // FIXED: Process up to the effective limit (which could be Infinity)
+          const itemsToProcess = Math.min(exportData.bundle.entry.length, effectiveLimit);
+          for (let i = 0; i < itemsToProcess; i++) {
             const entry = exportData.bundle.entry[i];
             if (entry.resource) {
               lines.push(JSON.stringify(entry.resource, null, 0));
@@ -432,20 +440,20 @@ export function ExportPreview() {
           }
         } else if (exportData.resources) {
           processedStructure = 'resources';
-          console.log('🔍 DEBUG: Processing resources');
           
           if (Array.isArray(exportData.resources)) {
             totalAvailableResources = exportData.resources.length;
             processedStructure = 'resources (array)';
-            console.log('🔍 DEBUG: Resources is array with', totalAvailableResources, 'items');
+            console.log('🔍 MEMO: Resources is array with', totalAvailableResources, 'items, limit:', effectiveLimit);
             
-            for (let i = 0; i < exportData.resources.length && actualRows < maxRows; i++) {
+            const itemsToProcess = Math.min(exportData.resources.length, effectiveLimit);
+            for (let i = 0; i < itemsToProcess; i++) {
               lines.push(JSON.stringify(exportData.resources[i], null, 0));
               actualRows++;
             }
           } else {
             processedStructure = 'resources (object)';
-            console.log('🔍 DEBUG: Resources is object with keys:', Object.keys(exportData.resources));
+            console.log('🔍 MEMO: Resources is object with keys:', Object.keys(exportData.resources));
             
             // Count total first
             for (const [resourceType, resourceArray] of Object.entries(exportData.resources)) {
@@ -454,16 +462,17 @@ export function ExportPreview() {
               }
             }
             
-            // Then process with limit
+            // Process with limit
             for (const [resourceType, resourceArray] of Object.entries(exportData.resources)) {
               if (Array.isArray(resourceArray)) {
-                console.log(`🔍 DEBUG: Processing ${resourceType} with ${resourceArray.length} items (actualRows: ${actualRows}/${maxRows})`);
-                for (let i = 0; i < resourceArray.length && actualRows < maxRows; i++) {
+                console.log(`🔍 MEMO: Processing ${resourceType} with ${resourceArray.length} items (actualRows: ${actualRows}/${effectiveLimit})`);
+                const itemsToProcess = Math.min(resourceArray.length, effectiveLimit - actualRows);
+                for (let i = 0; i < itemsToProcess; i++) {
                   lines.push(JSON.stringify(resourceArray[i], null, 0));
                   actualRows++;
                 }
-                if (actualRows >= maxRows) {
-                  console.log(`🔍 DEBUG: Hit maxRows limit at ${actualRows}, breaking`);
+                if (actualRows >= effectiveLimit) {
+                  console.log(`🔍 MEMO: Hit effectiveLimit at ${actualRows}, breaking`);
                   break;
                 }
               }
@@ -472,46 +481,31 @@ export function ExportPreview() {
         }
         
         // Add truncation message if we hit the limit
-        if (actualRows >= maxRows && totalAvailableResources > maxRows) {
-          lines.push(`// ... ${totalAvailableResources - maxRows} more resources (limited to ${maxRows.toLocaleString()} for preview)`);
+        if (actualRows >= effectiveLimit && totalAvailableResources > effectiveLimit && effectiveLimit !== Infinity) {
+          lines.push(`// ... ${totalAvailableResources - actualRows} more resources (limited to ${effectiveLimit.toLocaleString()} for preview)`);
         }
         
-        const finalLines = lines.length;
-        console.log('🔍 DEBUG: NDJSON - created', finalLines, 'lines from', actualRows, 'resources out of', totalAvailableResources, 'available');
-        
-        return {
-          displayData: lines.join('\n'),
-          actualDisplayedRows: actualRows,
-          debugInfo: {
-            format: 'ndjson',
-            structure: processedStructure,
-            actualRows,
-            totalAvailableResources,
-            finalLines,
-            maxRows,
-            limitReached: actualRows >= maxRows
-          }
-        };
+        resultData = lines.join('\n');
         
       } else {
-        // Regular JSON format with truncation
+        // Regular JSON format
         let dataToDisplay = { ...exportData };
         processedStructure = 'json';
         
         if (exportData.bundle && exportData.bundle.entry) {
           totalAvailableResources = exportData.bundle.entry.length;
           processedStructure = 'json bundle.entry';
-          console.log('🔍 DEBUG: JSON - Processing bundle.entry with', totalAvailableResources, 'items, maxRows:', maxRows);
+          console.log('🔍 MEMO: JSON - Processing bundle.entry with', totalAvailableResources, 'items, limit:', effectiveLimit);
           
-          if (exportData.bundle.entry.length > maxRows) {
+          if (exportData.bundle.entry.length > effectiveLimit && effectiveLimit !== Infinity) {
             dataToDisplay.bundle = {
               ...exportData.bundle,
-              entry: exportData.bundle.entry.slice(0, maxRows)
+              entry: exportData.bundle.entry.slice(0, effectiveLimit)
             };
             dataToDisplay.truncated = true;
-            dataToDisplay.displayedResources = maxRows;
+            dataToDisplay.displayedResources = effectiveLimit;
             dataToDisplay.totalResources = exportData.bundle.entry.length;
-            actualRows = maxRows;
+            actualRows = effectiveLimit;
           } else {
             actualRows = exportData.bundle.entry.length;
           }
@@ -521,21 +515,21 @@ export function ExportPreview() {
           if (Array.isArray(exportData.resources)) {
             totalAvailableResources = exportData.resources.length;
             processedStructure = 'json resources (array)';
-            console.log('🔍 DEBUG: JSON - Processing resources array with', totalAvailableResources, 'items');
+            console.log('🔍 MEMO: JSON - Processing resources array with', totalAvailableResources, 'items');
             
-            if (exportData.resources.length > maxRows) {
-              dataToDisplay.resources = exportData.resources.slice(0, maxRows);
+            if (exportData.resources.length > effectiveLimit && effectiveLimit !== Infinity) {
+              dataToDisplay.resources = exportData.resources.slice(0, effectiveLimit);
               dataToDisplay.truncated = true;
-              dataToDisplay.displayedResources = maxRows;
+              dataToDisplay.displayedResources = effectiveLimit;
               dataToDisplay.totalResources = exportData.resources.length;
-              actualRows = maxRows;
+              actualRows = effectiveLimit;
             } else {
               actualRows = exportData.resources.length;
             }
           } else {
             // Handle object with resource types
             processedStructure = 'json resources (object)';
-            console.log('🔍 DEBUG: JSON - Processing resources object');
+            console.log('🔍 MEMO: JSON - Processing resources object');
             const truncatedResources = {};
             let displayedResourceCount = 0;
             
@@ -546,25 +540,27 @@ export function ExportPreview() {
               }
             }
             
-            console.log('🔍 DEBUG: Total resource count:', totalAvailableResources, 'maxRows:', maxRows);
+            console.log('🔍 MEMO: Total resource count:', totalAvailableResources, 'effectiveLimit:', effectiveLimit);
             
-            if (totalAvailableResources > maxRows) {
+            if (totalAvailableResources > effectiveLimit && effectiveLimit !== Infinity) {
               // Truncate across resource types
               for (const [type, resources] of Object.entries(exportData.resources)) {
-                if (Array.isArray(resources) && displayedResourceCount < maxRows) {
-                  const remainingSlots = maxRows - displayedResourceCount;
+                if (Array.isArray(resources) && displayedResourceCount < effectiveLimit) {
+                  const remainingSlots = effectiveLimit - displayedResourceCount;
                   const slicedResources = resources.slice(0, remainingSlots);
                   truncatedResources[type] = slicedResources;
                   displayedResourceCount += slicedResources.length;
-                  console.log(`🔍 DEBUG: Added ${slicedResources.length} ${type} resources (total now: ${displayedResourceCount})`);
-                } else if (displayedResourceCount < maxRows) {
+                  console.log(`🔍 MEMO: Added ${slicedResources.length} ${type} resources (total now: ${displayedResourceCount})`);
+                } else if (displayedResourceCount < effectiveLimit) {
                   truncatedResources[type] = resources;
-                  displayedResourceCount += resources.length;
-                  console.log(`🔍 DEBUG: Added all ${resources.length} ${type} resources (total now: ${displayedResourceCount})`);
+                  if (Array.isArray(resources)) {
+                    displayedResourceCount += resources.length;
+                  }
+                  console.log(`🔍 MEMO: Added all ${Array.isArray(resources) ? resources.length : 'non-array'} ${type} resources (total now: ${displayedResourceCount})`);
                 }
                 
-                if (displayedResourceCount >= maxRows) {
-                  console.log(`🔍 DEBUG: Hit maxRows limit at ${displayedResourceCount}, breaking`);
+                if (displayedResourceCount >= effectiveLimit) {
+                  console.log(`🔍 MEMO: Hit effectiveLimit at ${displayedResourceCount}, breaking`);
                   break;
                 }
               }
@@ -580,50 +576,62 @@ export function ExportPreview() {
           }
         }
         
-        const jsonString = JSON.stringify(dataToDisplay, null, exportSettings.prettyPrint ? 2 : 0);
-        const jsonLines = jsonString.split('\n').length;
-        
-        console.log('🔍 DEBUG: JSON - displaying', actualRows, 'resources as', jsonLines, 'lines out of', totalAvailableResources, 'available');
-        
-        return {
-          displayData: jsonString,
-          actualDisplayedRows: actualRows,
-          debugInfo: {
-            format: 'json',
-            structure: processedStructure,
-            actualRows,
-            totalAvailableResources,
-            jsonLines,
-            maxRows,
-            limitReached: actualRows >= maxRows,
-            prettyPrint: exportSettings.prettyPrint
-          }
-        };
+        resultData = JSON.stringify(dataToDisplay, null, exportSettings.prettyPrint ? 2 : 0);
       }
+      
+      const jsonLines = resultData.split('\n').length;
+      
+      console.log('🔍 MEMO: Final result:', {
+        actualRows,
+        totalAvailableResources,
+        jsonLines,
+        effectiveLimit,
+        wasLimited: actualRows < totalAvailableResources,
+        format: exportSettings.format
+      });
+      
+      return {
+        displayData: resultData,
+        actualDisplayedRows: actualRows,
+        debugInfo: {
+          format: exportSettings.format,
+          structure: processedStructure,
+          actualRows,
+          totalAvailableResources,
+          jsonLines,
+          effectiveLimit,
+          limitReached: actualRows >= effectiveLimit && effectiveLimit !== Infinity,
+          prettyPrint: exportSettings.prettyPrint
+        }
+      };
     } catch (error) {
-      console.error('🔍 DEBUG: Error in useMemo:', error);
+      console.error('🔍 MEMO: Error in useMemo:', error);
       return {
         displayData: `Error formatting data: ${error.message}\n\nDebug info:\n${JSON.stringify(debugInfo, null, 2)}`,
         actualDisplayedRows: 0,
         debugInfo: { error: error.message }
       };
     }
-  }, [
-    exportData, 
-    exportSettings.displayRows, 
-    exportSettings.format, 
-    exportSettings.prettyPrint, 
-    debugInfo
-  ]); // FIXED: Added all necessary dependencies
+  }, [exportData, exportSettings.displayRows, exportSettings.format, exportSettings.prettyPrint, debugInfo]);
+
+  // Get display data
+  const getDisplayData = function() {
+    return displayData;
+  };
 
   // Get file size estimate
   const getFileSizeEstimate = function() {
-    const data = displayData;
+    const data = getDisplayData();
     const sizeInBytes = new Blob([data]).size;
     
     if (sizeInBytes < 1024) return `${sizeInBytes} bytes`;
     if (sizeInBytes < 1024 * 1024) return `${(sizeInBytes / 1024).toFixed(1)} KB`;
     return `${(sizeInBytes / (1024 * 1024)).toFixed(1)} MB`;
+  };
+
+  // Get displayed resource count
+  const getDisplayedResourceCount = function() {
+    return actualDisplayedRows;
   };
 
   if (!Meteor.userId()) {
@@ -722,14 +730,14 @@ export function ExportPreview() {
                 </Select>
               </FormControl>
 
-              {/* Preview Rows Selector with expanded options and performance indicators */}
+              {/* FIXED: Preview Rows Selector with much higher limits */}
               <FormControl fullWidth sx={{ mb: 2 }}>
                 <InputLabel>Preview Rows</InputLabel>
                 <Select
                   value={exportSettings.displayRows}
                   label="Preview Rows"
                   onChange={function(e) { 
-                    console.log('🔍 DEBUG: Preview rows SELECT onChange to:', e.target.value);
+                    console.log('🔍 DEBUG: Preview rows changed to:', e.target.value);
                     handleDisplayRowsChange(e.target.value); 
                   }}
                 >
@@ -752,7 +760,7 @@ export function ExportPreview() {
               </FormControl>
 
               {/* Show performance warning for current selection */}
-              {exportSettings.displayRows > 5000 && (
+              {exportSettings.displayRows > 10000 && (
                 <Alert severity="warning" sx={{ mb: 2, fontSize: '0.75rem' }}>
                   <Typography variant="caption">
                     {getPerformanceInfo(exportSettings.displayRows).warning}
@@ -870,7 +878,7 @@ export function ExportPreview() {
                     </ListItemIcon>
                     <ListItemText
                       primary="Showing Resources"
-                      secondary={`${actualDisplayedRows.toLocaleString()} of ${get(exportData, 'summary.totalResources', 0).toLocaleString()}`}
+                      secondary={`${getDisplayedResourceCount().toLocaleString()} of ${get(exportData, 'summary.totalResources', 0).toLocaleString()}`}
                     />
                   </ListItem>
                   
@@ -926,8 +934,8 @@ export function ExportPreview() {
                       {displayDebugInfo.jsonLines && (
                         <span>, <strong>JSON Lines:</strong> {displayDebugInfo.jsonLines.toLocaleString()}</span>
                       )}
-                      {displayDebugInfo.finalLines && (
-                        <span>, <strong>NDJSON Lines:</strong> {displayDebugInfo.finalLines.toLocaleString()}</span>
+                      {displayDebugInfo.effectiveLimit !== undefined && (
+                        <span>, <strong>Limit:</strong> {displayDebugInfo.effectiveLimit === Infinity ? 'None' : displayDebugInfo.effectiveLimit.toLocaleString()}</span>
                       )}
                     </Typography>
                   )}
@@ -952,9 +960,8 @@ export function ExportPreview() {
                   
                   {exportData && (
                     <Box display="flex" alignItems="center" gap={1}>
-                      {/* Chip shows actual displayed count from state */}
                       <Chip
-                        label={`${actualDisplayedRows.toLocaleString()} of ${get(exportData, 'summary.totalResources', 0).toLocaleString()} resources`}
+                        label={`${getDisplayedResourceCount().toLocaleString()} of ${get(exportData, 'summary.totalResources', 0).toLocaleString()} resources`}
                         color="primary"
                         size="small"
                       />
@@ -965,8 +972,7 @@ export function ExportPreview() {
                           size="small"
                         />
                       )}
-                      {/* Performance indicator */}
-                      {exportSettings.displayRows > 10000 && (
+                      {exportSettings.displayRows > 50000 && (
                         <Chip
                           label="Large Dataset"
                           color="error"
@@ -997,7 +1003,7 @@ export function ExportPreview() {
                     showPrintMargin={true}
                     showGutter={true}
                     highlightActiveLine={true}
-                    value={displayData}
+                    value={getDisplayData()}
                     readOnly={true}
                     width="100%"
                     height="100%"
@@ -1066,7 +1072,7 @@ export function ExportPreview() {
                   <strong>Browser may freeze</strong> for 10+ seconds during rendering
                 </Typography>
               )}
-              {pendingDisplayRows >= 1000000 && (
+              {pendingDisplayRows >= 500000 && (
                 <Typography component="li" variant="body2" sx={{ mb: 0.5, color: 'error.main' }}>
                   <strong>Very high risk</strong> of browser crash on older devices
                 </Typography>
