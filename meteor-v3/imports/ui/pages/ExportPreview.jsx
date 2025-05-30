@@ -1,4 +1,4 @@
-// meteor-v3/imports/ui/pages/ExportPreview.jsx
+// meteor-v3/imports/ui/pages/ExportPreview.jsx - DEBUGGING VERSION
 import React, { useState, useEffect } from 'react';
 import { Meteor } from 'meteor/meteor';
 import { useNavigate, useLocation } from 'react-router-dom';
@@ -31,7 +31,8 @@ import {
   List,
   ListItem,
   ListItemText,
-  ListItemIcon
+  ListItemIcon,
+  Paper
 } from '@mui/material';
 
 import {
@@ -43,7 +44,8 @@ import {
   Info as InfoIcon,
   Warning as WarningIcon,
   Code as CodeIcon,
-  Refresh as RefreshIcon
+  Refresh as RefreshIcon,
+  BugReport as DebugIcon
 } from '@mui/icons-material';
 
 import AceEditor from 'react-ace';
@@ -83,10 +85,11 @@ export function ExportPreview() {
   const [error, setError] = useState(null);
   const [downloadDialogOpen, setDownloadDialogOpen] = useState(false);
   const [downloading, setDownloading] = useState(false);
+  const [debugInfo, setDebugInfo] = useState(null);
   
   // Export settings
   const [exportSettings, setExportSettings] = useState({
-    format: 'ndjson', // 'ndjson', 'bundle', 'individual'
+    format: 'ndjson', // FIXED: Start with ndjson as default
     prettyPrint: true,
     includeMetadata: true,
     theme: 'github',
@@ -99,28 +102,82 @@ export function ExportPreview() {
   const loadExportPreview = async function() {
     setLoading(true);
     setError(null);
+    setDebugInfo(null);
     
     try {
-      console.log('📊 Loading export preview with filters:', filters);
+      console.log('🔍 DEBUG: Starting export preview load...');
+      console.log('🔍 DEBUG: User ID:', Meteor.userId());
+      console.log('🔍 DEBUG: Filters:', filters);
+      console.log('🔍 DEBUG: Export Settings:', exportSettings);
       
-      const result = await new Promise(function(resolve, reject) {
-        Meteor.call('export.generatePreview', {
-          filters: filters,
-          format: exportSettings.format,
-          includeMetadata: exportSettings.includeMetadata,
-          resourceTypes: exportSettings.resourceTypes
-        }, function(error, result) {
-          if (error) reject(error);
-          else resolve(result);
+      // First, let's try to get basic stats to see if we have any data at all
+      const statsResult = await new Promise(function(resolve, reject) {
+        Meteor.call('dashboard.getStatistics', function(error, result) {
+          if (error) {
+            console.error('🔍 DEBUG: Error getting stats:', error);
+            reject(error);
+          } else {
+            console.log('🔍 DEBUG: Stats result:', result);
+            resolve(result);
+          }
         });
       });
-      
-      setExportData(result);
-      console.log('✅ Export preview loaded:', result.summary);
+
+      setDebugInfo(function(prev) {
+        return {
+          ...prev,
+          stats: statsResult,
+          hasData: (statsResult.totalCommunications + statsResult.totalClinicalImpressions + 
+                   statsResult.totalMedia + statsResult.totalPersons) > 0
+        };
+      });
+
+      // If we have data, try the export preview
+      if ((statsResult.totalCommunications + statsResult.totalClinicalImpressions + 
+           statsResult.totalMedia + statsResult.totalPersons) > 0) {
+        
+        console.log('🔍 DEBUG: We have data, calling export.generatePreview...');
+        
+        const result = await new Promise(function(resolve, reject) {
+          Meteor.call('export.generatePreview', {
+            filters: filters,
+            format: exportSettings.format,
+            includeMetadata: exportSettings.includeMetadata,
+            resourceTypes: exportSettings.resourceTypes
+          }, function(error, result) {
+            if (error) {
+              console.error('🔍 DEBUG: Error in export.generatePreview:', error);
+              reject(error);
+            } else {
+              console.log('🔍 DEBUG: Export preview result:', result);
+              resolve(result);
+            }
+          });
+        });
+        
+        setExportData(result);
+        console.log('✅ Export preview loaded:', result.summary);
+        
+      } else {
+        console.log('⚠️ No data available for export');
+        setError('No data available for export. Please import some Facebook data first.');
+      }
       
     } catch (error) {
       console.error('❌ Error loading export preview:', error);
       setError(error.reason || error.message);
+      
+      setDebugInfo(function(prev) {
+        return {
+          ...prev,
+          error: error,
+          errorDetails: {
+            reason: error.reason,
+            message: error.message,
+            stack: error.stack
+          }
+        };
+      });
     } finally {
       setLoading(false);
     }
@@ -129,12 +186,16 @@ export function ExportPreview() {
   // Load data on mount and when settings change
   useEffect(function() {
     if (Meteor.userId()) {
+      console.log('🔍 DEBUG: Component mounted, user ID:', Meteor.userId());
       loadExportPreview();
+    } else {
+      console.log('🔍 DEBUG: No user ID, skipping load');
     }
   }, [Meteor.userId(), exportSettings.format, exportSettings.includeMetadata, exportSettings.resourceTypes]);
 
   // Handle export setting changes
   const handleSettingChange = function(key, value) {
+    console.log('🔍 DEBUG: Setting change:', key, value);
     setExportSettings(function(prev) {
       return {
         ...prev,
@@ -146,83 +207,42 @@ export function ExportPreview() {
   // Handle resource type selection
   const handleResourceTypeChange = function(event) {
     const value = event.target.value;
+    console.log('🔍 DEBUG: Resource type change:', value);
     handleSettingChange('resourceTypes', typeof value === 'string' ? value.split(',') : value);
-  };
-
-  // Download the export
-  const handleDownload = async function() {
-    setDownloading(true);
-    
-    try {
-      console.log('📥 Starting download with settings:', exportSettings);
-      
-      const result = await new Promise(function(resolve, reject) {
-        Meteor.call('export.downloadData', {
-          filters: filters,
-          format: exportSettings.format,
-          prettyPrint: exportSettings.prettyPrint,
-          includeMetadata: exportSettings.includeMetadata,
-          resourceTypes: exportSettings.resourceTypes
-        }, function(error, result) {
-          if (error) reject(error);
-          else resolve(result);
-        });
-      });
-      
-      // Create download
-      const content = exportSettings.prettyPrint ? 
-        JSON.stringify(result, null, 2) : 
-        JSON.stringify(result);
-        
-      const blob = new Blob([content], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      
-      const timestamp = moment().format('YYYY-MM-DD-HHmm');
-      const resourceTypeLabel = exportSettings.resourceTypes.includes('all') ? 'all' : exportSettings.resourceTypes.join('-');
-      a.download = `facebook-fhir-export-${resourceTypeLabel}-${timestamp}.${exportSettings.format === 'ndjson' ? 'ndjson' : 'json'}`;
-      
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-      
-      setDownloadDialogOpen(false);
-      console.log('✅ Download completed');
-      
-    } catch (error) {
-      console.error('❌ Download error:', error);
-      setError('Download failed: ' + (error.reason || error.message));
-    } finally {
-      setDownloading(false);
-    }
   };
 
   // Format the data for display
   const getDisplayData = function() {
-    if (!exportData) return '';
+    if (!exportData) {
+      return '// No export data available\n// Debug info below:\n' + 
+             JSON.stringify(debugInfo, null, 2);
+    }
     
     try {
       if (exportSettings.format === 'ndjson') {
-        // Convert to NDJSON format
+        // Convert to NDJSON format - each resource on its own line
         const lines = [];
         
         if (exportData.bundle && exportData.bundle.entry) {
           exportData.bundle.entry.forEach(function(entry) {
             if (entry.resource) {
-              lines.push(JSON.stringify(entry.resource, null, exportSettings.prettyPrint ? 2 : 0));
+              lines.push(JSON.stringify(entry.resource, null, 0)); // No pretty print for NDJSON
             }
+          });
+        } else if (exportData.resources) {
+          // Handle direct resources array
+          exportData.resources.forEach(function(resource) {
+            lines.push(JSON.stringify(resource, null, 0));
           });
         }
         
         return lines.join('\n');
       } else {
-        // Regular JSON format
+        // Regular JSON format with pretty printing
         return JSON.stringify(exportData, null, exportSettings.prettyPrint ? 2 : 0);
       }
     } catch (error) {
-      return `Error formatting data: ${error.message}`;
+      return `Error formatting data: ${error.message}\n\nDebug info:\n${JSON.stringify(debugInfo, null, 2)}`;
     }
   };
 
@@ -277,18 +297,11 @@ export function ExportPreview() {
             >
               Refresh
             </Button>
-            
-            <Button
-              variant="contained"
-              startIcon={<DownloadIcon />}
-              onClick={function() { setDownloadDialogOpen(true); }}
-              disabled={loading || !exportData}
-            >
-              Download
-            </Button>
           </Box>
         </Box>
       </Box>
+
+      
 
       {/* Error Alert */}
       {error && (
@@ -327,28 +340,6 @@ export function ExportPreview() {
                 </Select>
               </FormControl>
 
-              {/* Resource Types */}
-              <FormControl fullWidth sx={{ mb: 2 }}>
-                <InputLabel>Resource Types</InputLabel>
-                <Select
-                  multiple
-                  value={exportSettings.resourceTypes}
-                  label="Resource Types"
-                  onChange={handleResourceTypeChange}
-                  renderValue={function(selected) {
-                    return selected.includes('all') ? 'All Resources' : selected.join(', ');
-                  }}
-                >
-                  <MenuItem value="all">All Resources</MenuItem>
-                  <MenuItem value="ClinicalImpression">Clinical Impressions</MenuItem>
-                  <MenuItem value="Communication">Communications</MenuItem>
-                  <MenuItem value="Media">Media</MenuItem>
-                  <MenuItem value="Person">Persons</MenuItem>
-                  <MenuItem value="CareTeam">Care Teams</MenuItem>
-                  <MenuItem value="Patient">Patients</MenuItem>
-                </Select>
-              </FormControl>
-
               {/* Editor Theme */}
               <FormControl fullWidth sx={{ mb: 2 }}>
                 <InputLabel>Editor Theme</InputLabel>
@@ -376,7 +367,40 @@ export function ExportPreview() {
                 sx={{ mb: 2 }}
               />
 
+              {/* Resource Types */}
+              <FormControl fullWidth sx={{ mb: 2 }}>
+                <InputLabel>Resource Types</InputLabel>
+                <Select
+                  multiple
+                  value={exportSettings.resourceTypes}
+                  label="Resource Types"
+                  onChange={handleResourceTypeChange}
+                  renderValue={function(selected) {
+                    return selected.includes('all') ? 'All Resources' : selected.join(', ');
+                  }}
+                >
+                  <MenuItem value="all">All Resources</MenuItem>
+                  <MenuItem value="ClinicalImpression">Clinical Impressions</MenuItem>
+                  <MenuItem value="Communication">Communications</MenuItem>
+                  <MenuItem value="Media">Media</MenuItem>
+                  <MenuItem value="Person">Persons</MenuItem>
+                  <MenuItem value="CareTeam">Care Teams</MenuItem>
+                  <MenuItem value="Patient">Patients</MenuItem>
+                </Select>
+              </FormControl>
+
               {/* Switches */}
+              <FormControlLabel
+                control={
+                  <Switch
+                    checked={exportSettings.wordWrap}
+                    onChange={function(e) { handleSettingChange('wordWrap', e.target.checked); }}
+                  />
+                }
+                label="Word Wrap"
+                sx={{ mb: 1, display: 'block' }}
+              />
+              
               <FormControlLabel
                 control={
                   <Switch
@@ -396,17 +420,6 @@ export function ExportPreview() {
                   />
                 }
                 label="Include Metadata"
-                sx={{ mb: 1, display: 'block' }}
-              />
-              
-              <FormControlLabel
-                control={
-                  <Switch
-                    checked={exportSettings.wordWrap}
-                    onChange={function(e) { handleSettingChange('wordWrap', e.target.checked); }}
-                  />
-                }
-                label="Word Wrap"
                 sx={{ display: 'block' }}
               />
             </CardContent>
@@ -474,7 +487,7 @@ export function ExportPreview() {
           )}
         </Grid>
 
-        {/* Code Editor */}
+        {/* Code Preview */}
         <Grid item xs={12} md={9}>
           <Card sx={{ height: '800px', display: 'flex', flexDirection: 'column' }}>
             <CardContent sx={{ flexGrow: 1, display: 'flex', flexDirection: 'column', p: 0 }}>
@@ -495,14 +508,6 @@ export function ExportPreview() {
                     />
                   )}
                 </Box>
-                
-                {filters.resourceType !== 'all' && (
-                  <Alert severity="info" sx={{ mt: 1 }}>
-                    <Typography variant="body2">
-                      Filtered view: {filters.resourceType} resources only
-                    </Typography>
-                  </Alert>
-                )}
               </Box>
 
               <Box sx={{ flexGrow: 1, position: 'relative' }}>
@@ -534,7 +539,14 @@ export function ExportPreview() {
                       enableSnippets: false,
                       showLineNumbers: true,
                       tabSize: 2,
-                      useWorker: false
+                      useWorker: false,
+                      scrollPastEnd: false,
+                      fixedWidthGutter: false
+                    }}
+                    style={{
+                      width: '100%',
+                      height: '100%',
+                      fontFamily: 'Monaco, Menlo, "Ubuntu Mono", monospace'
                     }}
                   />
                 ) : (
@@ -553,65 +565,6 @@ export function ExportPreview() {
           </Card>
         </Grid>
       </Grid>
-
-      {/* Download Confirmation Dialog */}
-      <Dialog
-        open={downloadDialogOpen}
-        onClose={function() { 
-          if (!downloading) {
-            setDownloadDialogOpen(false);
-          }
-        }}
-        maxWidth="sm"
-        fullWidth
-      >
-        <DialogTitle>
-          Confirm Export Download
-        </DialogTitle>
-        <DialogContent>
-          <Typography paragraph>
-            Are you sure you want to download the export file?
-          </Typography>
-          
-          <Box sx={{ bgcolor: 'grey.100', p: 2, borderRadius: 1, mb: 2 }}>
-            <Typography variant="body2">
-              <strong>Format:</strong> {exportSettings.format.toUpperCase()}
-            </Typography>
-            <Typography variant="body2">
-              <strong>Resources:</strong> {get(exportData, 'summary.totalResources', 0)}
-            </Typography>
-            <Typography variant="body2">
-              <strong>File Size:</strong> {getFileSizeEstimate()}
-            </Typography>
-            <Typography variant="body2">
-              <strong>Pretty Print:</strong> {exportSettings.prettyPrint ? 'Yes' : 'No'}
-            </Typography>
-          </Box>
-
-          <Alert severity="info">
-            <Typography variant="body2">
-              This file will contain your personal health data in FHIR format. 
-              Please store it securely and only share with authorized healthcare providers.
-            </Typography>
-          </Alert>
-        </DialogContent>
-        <DialogActions>
-          <Button 
-            onClick={function() { setDownloadDialogOpen(false); }}
-            disabled={downloading}
-          >
-            Cancel
-          </Button>
-          <Button 
-            onClick={handleDownload}
-            variant="contained"
-            disabled={downloading}
-            startIcon={downloading ? null : <DownloadIcon />}
-          >
-            {downloading ? 'Downloading...' : 'Download Export'}
-          </Button>
-        </DialogActions>
-      </Dialog>
     </Container>
   );
 }
