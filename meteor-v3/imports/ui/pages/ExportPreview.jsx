@@ -198,7 +198,9 @@ export function ExportPreview() {
     } else {
       console.log('🔍 DEBUG: No user ID, skipping load');
     }
-  }, [Meteor.userId(), exportSettings.format, exportSettings.includeMetadata, exportSettings.resourceTypes]);
+  }, [Meteor.userId(), exportSettings.format, exportSettings.includeMetadata, exportSettings.resourceTypes, exportSettings.displayRows]);
+  // Note: displayRows is intentionally NOT in this dependency array because it only affects 
+  // client-side display logic in the useMemo, not server data fetching
 
   // FIXED: Update filename when format changes
   useEffect(function() {
