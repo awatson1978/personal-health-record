@@ -67,7 +67,7 @@ function Header({ onMenuClick, onThemeToggle, darkMode }) {
         </IconButton>
 
         <Typography variant="h6" noWrap component="div" sx={{ flexGrow: 1 }}>
-          Facebook FHIR Timeline
+          Facebook to FHIR
         </Typography>
 
         <Box sx={{ display: 'flex', alignItems: 'center' }}>

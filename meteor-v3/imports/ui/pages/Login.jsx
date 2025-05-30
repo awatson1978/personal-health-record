@@ -40,7 +40,7 @@ export function Login() {
       <Box sx={{ marginTop: 8, display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
         <Paper elevation={3} sx={{ padding: 4, width: '100%' }}>
           <Typography component="h1" variant="h4" align="center" gutterBottom>
-            Facebook FHIR Timeline
+            Facebook to FHIR Timeline
           </Typography>
           <Typography variant="body1" align="center" color="text.secondary" sx={{ mb: 3 }}>
             Sign in to access your personal health timeline

@@ -2,7 +2,7 @@ import { Meteor } from 'meteor/meteor';
 import '../imports/startup/server';
 
 Meteor.startup(async function() {
-  console.log('🚀 Facebook FHIR Timeline Server Started');
+  console.log('🚀 Facebook to FHIR Timeline Server Started');
   console.log('📅 Startup Time:', new Date().toISOString());
   console.log('🌍 Environment:', process.env.NODE_ENV || 'development');
   

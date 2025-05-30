@@ -32,7 +32,10 @@ import {
   ListItem,
   ListItemAvatar,
   ListItemText,
-  ListItemSecondaryAction
+  ListItemSecondaryAction,
+  FormControlLabel,
+  Switch,
+  Snackbar
 } from '@mui/material';
 
 import {
@@ -48,7 +51,8 @@ import {
   Search as SearchIcon,
   Download as DownloadIcon,
   Refresh as RefreshIcon,
-  Clear as ClearIcon
+  Clear as ClearIcon,
+  Delete as DeleteIcon
 } from '@mui/icons-material';
 
 import { 
@@ -71,6 +75,8 @@ export function Timeline() {
   const [totalCount, setTotalCount] = useState(0);
   const [expandedItems, setExpandedItems] = useState(new Set());
   const [itemsPerPage, setItemsPerPage] = useState(25);
+  const [expandByDefault, setExpandByDefault] = useState(false);
+  const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'success' });
   
   // Filter state
   const [filters, setFilters] = useState({
@@ -108,6 +114,14 @@ export function Timeline() {
       setTimelineData(result.items || []);
       setTotalCount(result.totalCount || 0);
       setTotalPages(Math.ceil((result.totalCount || 0) / itemsPerPage));
+      
+      // Handle expand by default setting
+      if (expandByDefault && result.items) {
+        setExpandedItems(new Set(result.items.map(function(item) { return item._id; })));
+      } else if (!expandByDefault) {
+        setExpandedItems(new Set());
+      }
+      
       console.log('✅ Timeline data loaded:', result);
       
     } catch (error) {
@@ -176,6 +190,15 @@ export function Timeline() {
 
     return function() { clearTimeout(timeoutId); };
   }, [filters.dateRange.start, filters.dateRange.end]);
+
+  // Handle expand by default change
+  useEffect(function() {
+    if (expandByDefault && timelineData.length > 0) {
+      setExpandedItems(new Set(timelineData.map(function(item) { return item._id; })));
+    } else if (!expandByDefault) {
+      setExpandedItems(new Set());
+    }
+  }, [expandByDefault, timelineData]);
 
   // Handle pagination
   const handlePageChange = function(event, newPage) {
@@ -252,6 +275,7 @@ export function Timeline() {
     });
     setItemsPerPage(25);
     setPage(1);
+    setExpandByDefault(false);
   };
 
   // Clear date range only
@@ -294,6 +318,60 @@ export function Timeline() {
     navigate(exportUrl, {
       state: { filters: filters, itemsPerPage: itemsPerPage }
     });
+  };
+
+  // Handle delete item
+  const handleDeleteItem = async function(item) {
+
+    try {
+      let methodName = '';
+      
+      switch (item.resourceType) {
+        case 'ClinicalImpression':
+          methodName = 'fhir.deleteClinicalImpression';
+          break;
+        case 'Communication':
+          methodName = 'fhir.deleteCommunication';
+          break;
+        case 'Media':
+          methodName = 'fhir.deleteMedia';
+          break;
+        case 'Person':
+          methodName = 'fhir.deletePerson';
+          break;
+        default:
+          throw new Error('Unknown resource type');
+      }
+      
+      await new Promise(function(resolve, reject) {
+        Meteor.call(methodName, item._id, function(error, result) {
+          if (error) reject(error);
+          else resolve(result);
+        });
+      });
+      
+      setSnackbar({
+        open: true,
+        message: `${item.resourceType} deleted successfully`,
+        severity: 'success'
+      });
+      
+      // Reload current page data
+      loadTimelineData(page);
+      
+    } catch (error) {
+      console.error('Delete error:', error);
+      setSnackbar({
+        open: true,
+        message: `Error deleting item: ${error.reason || error.message}`,
+        severity: 'error'
+      });
+    }
+  };
+
+  // Close snackbar
+  const closeSnackbar = function() {
+    setSnackbar({ ...snackbar, open: false });
   };
 
   // Get resource type icon and color
@@ -405,26 +483,46 @@ export function Timeline() {
           <Collapse in={isExpanded} timeout="auto" unmountOnExit>
             <Box sx={{ pl: 7, pr: 2, pb: 1 }}>
               {/* Metadata */}
-              <Box display="flex" flexWrap="wrap" gap={1}>
-                {Object.entries(metadata).map(function([key, value]) {
-                  if (value === null || value === undefined || value === '') return null;
+              <Box display="flex" flexWrap="wrap" gap={1} alignItems="center" justifyContent="space-between">
+                <Box display="flex" flexWrap="wrap" gap={1}>
+                  {/* FHIR ResourceType chip */}
+                  <Chip
+                    label={`FHIR: ${item.resourceType}`}
+                    size="small"
+                    color="primary"
+                    variant="filled"
+                  />
                   
-                  return (
-                    <Chip
-                      key={key}
-                      label={`${key}: ${value}`}
-                      size="small"
-                      variant="outlined"
-                    />
-                  );
-                })}
+                  {Object.entries(metadata).map(function([key, value]) {
+                    if (value === null || value === undefined || value === '') return null;
+                    
+                    return (
+                      <Chip
+                        key={key}
+                        label={`${key}: ${value}`}
+                        size="small"
+                        variant="outlined"
+                      />
+                    );
+                  })}
+                  
+                  <Chip
+                    label={`ID: ${item._id}`}
+                    size="small"
+                    variant="outlined"
+                    color="default"
+                  />
+                </Box>
                 
-                <Chip
-                  label={`ID: ${item._id}`}
+                {/* Delete button */}
+                <IconButton
                   size="small"
-                  variant="outlined"
-                  color="default"
-                />
+                  onClick={function() { handleDeleteItem(item); }}
+                  color="error"
+                  aria-label="delete item"
+                >
+                  <DeleteIcon />
+                </IconButton>
               </Box>
             </Box>
           </Collapse>
@@ -587,8 +685,12 @@ export function Timeline() {
                   <MenuItem value={25}>25 items</MenuItem>
                   <MenuItem value={50}>50 items</MenuItem>
                   <MenuItem value={100}>100 items</MenuItem>
+                  <MenuItem value={500}>500 items</MenuItem>
+                  <MenuItem value={1000}>1000 items</MenuItem>
                 </Select>
               </FormControl>
+
+
 
               {/* Sort Options */}
               <FormControl fullWidth sx={{ mb: 1 }}>
@@ -614,6 +716,17 @@ export function Timeline() {
                   <MenuItem value="asc">Oldest First</MenuItem>
                 </Select>
               </FormControl>
+
+              <FormControlLabel
+                control={
+                  <Switch
+                    checked={expandByDefault}
+                    onChange={function(e) { setExpandByDefault(e.target.checked); }}
+                  />
+                }
+                label="Expand cards by default"
+                sx={{ mb: 2, display: 'block' }}
+              />
             </CardContent>
           </Card>
 
@@ -741,6 +854,21 @@ export function Timeline() {
           )}
         </Grid>
       </Grid>
+
+      {/* Success/Error Snackbar */}
+      <Snackbar
+        open={snackbar.open}
+        autoHideDuration={4000}
+        onClose={closeSnackbar}
+      >
+        <Alert 
+          onClose={closeSnackbar} 
+          severity={snackbar.severity}
+          sx={{ width: '100%' }}
+        >
+          {snackbar.message}
+        </Alert>
+      </Snackbar>
     </Container>
   );
 }

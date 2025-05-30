@@ -1,4 +1,4 @@
-// meteor-v3/imports/ui/pages/ExportPreview.jsx - DEBUGGING VERSION
+// meteor-v3/imports/ui/pages/ExportPreview.jsx
 import React, { useState, useEffect } from 'react';
 import { Meteor } from 'meteor/meteor';
 import { useNavigate, useLocation } from 'react-router-dom';
@@ -83,19 +83,19 @@ export function ExportPreview() {
   const [exportData, setExportData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [downloadDialogOpen, setDownloadDialogOpen] = useState(false);
   const [downloading, setDownloading] = useState(false);
   const [debugInfo, setDebugInfo] = useState(null);
   
   // Export settings
   const [exportSettings, setExportSettings] = useState({
-    format: 'ndjson', // FIXED: Start with ndjson as default
+    format: 'ndjson',
     prettyPrint: true,
     includeMetadata: true,
     theme: 'github',
     fontSize: 14,
-    wordWrap: true,
-    resourceTypes: ['all'] // Array of resource types to include
+    wordWrap: false, // Changed default to false
+    resourceTypes: ['all'],
+    displayRows: 1000 // New setting for number of rows to display
   });
 
   // Load export preview data
@@ -211,7 +211,85 @@ export function ExportPreview() {
     handleSettingChange('resourceTypes', typeof value === 'string' ? value.split(',') : value);
   };
 
-  // Format the data for display
+  // Handle download
+  const handleDownload = async function() {
+    if (!exportData) {
+      console.error('No export data to download');
+      return;
+    }
+
+    setDownloading(true);
+    
+    try {
+      console.log('📥 Starting download...');
+      
+      // Get the full export data (not just preview)
+      const downloadResult = await new Promise(function(resolve, reject) {
+        Meteor.call('export.downloadData', {
+          filters: filters,
+          format: exportSettings.format,
+          prettyPrint: exportSettings.prettyPrint,
+          includeMetadata: exportSettings.includeMetadata,
+          resourceTypes: exportSettings.resourceTypes
+        }, function(error, result) {
+          if (error) reject(error);
+          else resolve(result);
+        });
+      });
+      
+      // Format the data for download
+      let downloadData = '';
+      let fileName = `fhir-export-${moment().format('YYYY-MM-DD-HHmm')}`;
+      let mimeType = 'application/json';
+      
+      if (exportSettings.format === 'ndjson') {
+        // Convert to NDJSON format - each resource on its own line
+        const lines = [];
+        
+        if (downloadResult.bundle && downloadResult.bundle.entry) {
+          downloadResult.bundle.entry.forEach(function(entry) {
+            if (entry.resource) {
+              lines.push(JSON.stringify(entry.resource, null, 0));
+            }
+          });
+        } else if (downloadResult.resources) {
+          downloadResult.resources.forEach(function(resource) {
+            lines.push(JSON.stringify(resource, null, 0));
+          });
+        }
+        
+        downloadData = lines.join('\n');
+        fileName += '.ndjson';
+        mimeType = 'application/x-ndjson';
+      } else {
+        // Regular JSON format
+        downloadData = JSON.stringify(downloadResult, null, exportSettings.prettyPrint ? 2 : 0);
+        fileName += '.json';
+        mimeType = 'application/json';
+      }
+      
+      // Create and trigger download
+      const blob = new Blob([downloadData], { type: mimeType });
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = fileName;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+      
+      console.log(`✅ Download completed: ${fileName}`);
+      
+    } catch (error) {
+      console.error('❌ Download error:', error);
+      setError(`Download failed: ${error.reason || error.message}`);
+    } finally {
+      setDownloading(false);
+    }
+  };
+
+  // Format the data for display (limited by displayRows setting)
   const getDisplayData = function() {
     if (!exportData) {
       return '// No export data available\n// Debug info below:\n' + 
@@ -222,24 +300,53 @@ export function ExportPreview() {
       if (exportSettings.format === 'ndjson') {
         // Convert to NDJSON format - each resource on its own line
         const lines = [];
+        let resourceCount = 0;
         
         if (exportData.bundle && exportData.bundle.entry) {
-          exportData.bundle.entry.forEach(function(entry) {
-            if (entry.resource) {
-              lines.push(JSON.stringify(entry.resource, null, 0)); // No pretty print for NDJSON
+          for (const entry of exportData.bundle.entry) {
+            if (entry.resource && resourceCount < exportSettings.displayRows) {
+              lines.push(JSON.stringify(entry.resource, null, 0));
+              resourceCount++;
+            } else if (resourceCount >= exportSettings.displayRows) {
+              break;
             }
-          });
+          }
         } else if (exportData.resources) {
-          // Handle direct resources array
-          exportData.resources.forEach(function(resource) {
-            lines.push(JSON.stringify(resource, null, 0));
-          });
+          for (const resource of exportData.resources) {
+            if (resourceCount < exportSettings.displayRows) {
+              lines.push(JSON.stringify(resource, null, 0));
+              resourceCount++;
+            } else {
+              break;
+            }
+          }
+        }
+        
+        // Add truncation message if we hit the limit
+        if (resourceCount >= exportSettings.displayRows && exportData.summary.totalResources > exportSettings.displayRows) {
+          lines.push(`// ... ${exportData.summary.totalResources - exportSettings.displayRows} more resources (limited to ${exportSettings.displayRows} for preview)`);
         }
         
         return lines.join('\n');
       } else {
-        // Regular JSON format with pretty printing
-        return JSON.stringify(exportData, null, exportSettings.prettyPrint ? 2 : 0);
+        // Regular JSON format with truncation
+        let dataToDisplay = exportData;
+        
+        // Truncate if we have too many resources
+        if (exportData.bundle && exportData.bundle.entry && exportData.bundle.entry.length > exportSettings.displayRows) {
+          dataToDisplay = {
+            ...exportData,
+            bundle: {
+              ...exportData.bundle,
+              entry: exportData.bundle.entry.slice(0, exportSettings.displayRows)
+            },
+            truncated: true,
+            displayedResources: exportSettings.displayRows,
+            totalResources: exportData.bundle.entry.length
+          };
+        }
+        
+        return JSON.stringify(dataToDisplay, null, exportSettings.prettyPrint ? 2 : 0);
       }
     } catch (error) {
       return `Error formatting data: ${error.message}\n\nDebug info:\n${JSON.stringify(debugInfo, null, 2)}`;
@@ -283,25 +390,26 @@ export function ExportPreview() {
           <Box display="flex" gap={1}>
             <Button
               variant="outlined"
-              startIcon={<BackIcon />}
-              onClick={function() { navigate(-1); }}
-            >
-              Back
-            </Button>
-            
-            <Button
-              variant="outlined"
               startIcon={<RefreshIcon />}
               onClick={loadExportPreview}
               disabled={loading}
             >
               Refresh
             </Button>
+            <Button
+              variant="contained"
+              startIcon={<DownloadIcon />}
+              onClick={handleDownload}
+              disabled={downloading || !exportData}
+              size="large"
+            >
+              {downloading ? 'Downloading...' : 'Download'}
+            </Button>
+            
+            
           </Box>
         </Box>
       </Box>
-
-      
 
       {/* Error Alert */}
       {error && (
@@ -337,6 +445,24 @@ export function ExportPreview() {
                   <MenuItem value="ndjson">NDJSON (Newline Delimited)</MenuItem>
                   <MenuItem value="bundle">FHIR Bundle</MenuItem>
                   <MenuItem value="individual">Individual Resources</MenuItem>
+                </Select>
+              </FormControl>
+
+              {/* Display Rows Selector */}
+              <FormControl fullWidth sx={{ mb: 2 }}>
+                <InputLabel>Preview Rows</InputLabel>
+                <Select
+                  value={exportSettings.displayRows}
+                  label="Preview Rows"
+                  onChange={function(e) { handleSettingChange('displayRows', e.target.value); }}
+                >
+                  <MenuItem value={100}>100 rows</MenuItem>
+                  <MenuItem value={200}>200 rows</MenuItem>
+                  <MenuItem value={500}>500 rows</MenuItem>
+                  <MenuItem value={1000}>1000 rows</MenuItem>
+                  <MenuItem value={5000}>5000 rows</MenuItem>
+                  <MenuItem value={10000}>10000 rows</MenuItem>
+                  <MenuItem value={-1}>All rows</MenuItem>
                 </Select>
               </FormControl>
 
@@ -446,10 +572,20 @@ export function ExportPreview() {
                   
                   <ListItem>
                     <ListItemIcon>
+                      <PreviewIcon color="secondary" />
+                    </ListItemIcon>
+                    <ListItemText
+                      primary="Preview Limit"
+                      secondary={exportSettings.displayRows === -1 ? 'All' : exportSettings.displayRows}
+                    />
+                  </ListItem>
+                  
+                  <ListItem>
+                    <ListItemIcon>
                       <CheckIcon color="success" />
                     </ListItemIcon>
                     <ListItemText
-                      primary="File Size"
+                      primary="Preview Size"
                       secondary={getFileSizeEstimate()}
                     />
                   </ListItem>
@@ -501,11 +637,20 @@ export function ExportPreview() {
                   </Box>
                   
                   {exportData && (
-                    <Chip
-                      label={`${get(exportData, 'summary.totalResources', 0)} resources`}
-                      color="primary"
-                      size="small"
-                    />
+                    <Box display="flex" alignItems="center" gap={1}>
+                      <Chip
+                        label={`${get(exportData, 'summary.totalResources', 0)} total resources`}
+                        color="primary"
+                        size="small"
+                      />
+                      {exportSettings.displayRows !== -1 && exportSettings.displayRows < get(exportData, 'summary.totalResources', 0) && (
+                        <Chip
+                          label={`Showing ${exportSettings.displayRows}`}
+                          color="warning"
+                          size="small"
+                        />
+                      )}
+                    </Box>
                   )}
                 </Box>
               </Box>

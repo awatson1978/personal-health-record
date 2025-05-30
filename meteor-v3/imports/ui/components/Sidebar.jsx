@@ -154,7 +154,7 @@ function Sidebar({ open, onClose, user, drawerWidth = 240 }) {
         mt: 'auto'
       }}>
         <Typography variant="caption" color="text.secondary" align="center" display="block">
-          Facebook FHIR Timeline v2.0
+          Facebook to FHIR v2.0
         </Typography>
       </Box>
     </Box>
