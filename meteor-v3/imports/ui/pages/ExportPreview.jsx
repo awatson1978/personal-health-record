@@ -87,7 +87,7 @@ export function ExportPreview() {
   const [downloading, setDownloading] = useState(false);
   const [debugInfo, setDebugInfo] = useState(null);
   
-  // FIXED: Export settings with correct default for displayRows
+  // FIXED: Export settings - displayRows now only affects client-side display
   const [exportSettings, setExportSettings] = useState({
     format: 'ndjson',
     prettyPrint: true,
@@ -96,10 +96,10 @@ export function ExportPreview() {
     fontSize: 14,
     wordWrap: false,
     resourceTypes: ['all'],
-    displayRows: 100 // FIXED: Changed from 1000 to 100
+    displayRows: 100 // This now only controls client-side display
   });
 
-  // FIXED: Add filename state with default value based on current settings
+  // Filename state
   const [filename, setFilename] = useState(function() {
     return `fhir-export-${moment().format('YYYY-MM-DD-HHmm')}`;
   });
@@ -150,7 +150,7 @@ export function ExportPreview() {
             format: exportSettings.format,
             includeMetadata: exportSettings.includeMetadata,
             resourceTypes: exportSettings.resourceTypes,
-            previewLimit: exportSettings.displayRows === -1 ? 10000 : exportSettings.displayRows // FIXED: Pass client's displayRows to server
+            previewLimit: 5000 // FIXED: Always fetch a large amount from server (5000 resources)
           }, function(error, result) {
             if (error) {
               console.error('🔍 DEBUG: Error in export.generatePreview:', error);
@@ -190,7 +190,8 @@ export function ExportPreview() {
     }
   };
 
-  // FIXED: Load data on mount and when relevant settings change
+  // FIXED: Load data on mount and when server-relevant settings change
+  // Removed exportSettings.displayRows from dependencies since it's now client-only
   useEffect(function() {
     if (Meteor.userId()) {
       console.log('🔍 DEBUG: Component mounted, user ID:', Meteor.userId());
@@ -198,11 +199,10 @@ export function ExportPreview() {
     } else {
       console.log('🔍 DEBUG: No user ID, skipping load');
     }
-  }, [Meteor.userId(), exportSettings.format, exportSettings.includeMetadata, exportSettings.resourceTypes, exportSettings.displayRows]);
-  // Note: displayRows is intentionally NOT in this dependency array because it only affects 
-  // client-side display logic in the useMemo, not server data fetching
+  }, [Meteor.userId(), exportSettings.format, exportSettings.includeMetadata, exportSettings.resourceTypes]);
+  // REMOVED: exportSettings.displayRows from dependencies - now it's client-side only!
 
-  // FIXED: Update filename when format changes
+  // Update filename when format changes
   useEffect(function() {
     const baseFilename = `fhir-export-${moment().format('YYYY-MM-DD-HHmm')}`;
     const extension = exportSettings.format === 'ndjson' ? '.ndjson' : '.json';
@@ -314,7 +314,7 @@ export function ExportPreview() {
     }
   };
 
-  // FIXED: Use useMemo to calculate display data and track row count without causing re-renders
+  // FIXED: Optimized useMemo with client-side only row limiting
   const { displayData, actualDisplayedRows, debugInfo: displayDebugInfo } = React.useMemo(function() {
     if (!exportData) {
       return {
@@ -326,8 +326,9 @@ export function ExportPreview() {
     }
     
     try {
+      // FIXED: Use displayRows for client-side limiting only
       const maxRows = exportSettings.displayRows === -1 ? Infinity : exportSettings.displayRows;
-      console.log('🔍 DEBUG: Processing with maxRows:', maxRows, 'format:', exportSettings.format);
+      console.log('🔍 DEBUG: Client-side limiting with maxRows:', maxRows, 'format:', exportSettings.format);
       console.log('🔍 DEBUG: exportData keys:', Object.keys(exportData));
       console.log('🔍 DEBUG: exportData.summary:', exportData.summary);
       
@@ -530,8 +531,9 @@ export function ExportPreview() {
       };
     }
   }, [exportData, exportSettings.displayRows, exportSettings.format, exportSettings.prettyPrint, debugInfo]);
+  // FIXED: Now displayRows changes will immediately update the display without server calls
 
-  // FIXED: Completely rewritten getDisplayData function with proper row limiting
+  // Get display data
   const getDisplayData = function() {
     return displayData;
   };
@@ -546,7 +548,7 @@ export function ExportPreview() {
     return `${(sizeInBytes / (1024 * 1024)).toFixed(1)} MB`;
   };
 
-  // FIXED: Simplified getDisplayedResourceCount to use actualDisplayedRows
+  // Get displayed resource count
   const getDisplayedResourceCount = function() {
     return actualDisplayedRows;
   };
@@ -620,7 +622,7 @@ export function ExportPreview() {
                 </Typography>
               </Box>
 
-              {/* FIXED: Filename input field */}
+              {/* Filename input field */}
               <TextField
                 fullWidth
                 label="Download Filename"
@@ -647,7 +649,7 @@ export function ExportPreview() {
                 </Select>
               </FormControl>
 
-              {/* FIXED: Display Rows Selector with correct default */}
+              {/* FIXED: Preview Rows Selector - now affects only client-side display */}
               <FormControl fullWidth sx={{ mb: 2 }}>
                 <InputLabel>Preview Rows</InputLabel>
                 <Select
@@ -664,7 +666,6 @@ export function ExportPreview() {
                   <MenuItem value={500}>500 rows</MenuItem>
                   <MenuItem value={1000}>1000 rows</MenuItem>
                   <MenuItem value={5000}>5000 rows</MenuItem>
-                  <MenuItem value={10000}>10000 rows</MenuItem>
                   <MenuItem value={-1}>All rows</MenuItem>
                 </Select>
               </FormControl>
@@ -822,7 +823,7 @@ export function ExportPreview() {
                   </Box>
                 )}
 
-                {/* FIXED: Enhanced debug info showing processing details */}
+                {/* Enhanced debug info showing processing details */}
                 <Box sx={{ mt: 2, p: 1, bgcolor: 'grey.100', borderRadius: 1 }}>
                   <Typography variant="caption" component="div">
                     <strong>Debug:</strong> displayRows={exportSettings.displayRows}, actualDisplayedRows={actualDisplayedRows}
@@ -861,7 +862,7 @@ export function ExportPreview() {
                   
                   {exportData && (
                     <Box display="flex" alignItems="center" gap={1}>
-                      {/* FIXED: Chip now shows actual displayed count from state */}
+                      {/* Chip shows actual displayed count from state */}
                       <Chip
                         label={`${getDisplayedResourceCount()} of ${get(exportData, 'summary.totalResources', 0)} resources`}
                         color="primary"

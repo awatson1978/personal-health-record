@@ -36,7 +36,7 @@ Meteor.methods({
 
     try {
       const page = get(options, 'page', 1);
-      const limit = Math.min(get(options, 'limit', 25), 100); // Cap at 100
+      const limit = Math.min(get(options, 'limit', 25), 10000); // FIXED: Cap at 10000 instead of 100
       const filters = get(options, 'filters', {});
       const skip = (page - 1) * limit;
 
@@ -236,7 +236,7 @@ Meteor.methods({
         return cleanItem;
       });
 
-      console.log(`✅ Timeline data retrieved: ${cleanedItems.length} items (page ${page}/${Math.ceil(totalCount / limit)})`);
+      console.log(`✅ Timeline data retrieved: ${cleanedItems.length} items (page ${page}/${Math.ceil(totalCount / limit)}), total available: ${totalCount}`);
 
       return {
         items: cleanedItems,
