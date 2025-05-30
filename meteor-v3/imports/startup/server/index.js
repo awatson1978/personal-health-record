@@ -11,6 +11,7 @@ import '../../api/fhir/server/methods';
 import '../../api/fhir/server/dashboard-methods';
 import '../../api/fhir/server/timeline-methods';
 import '../../api/fhir/server/export-methods';
+import '../../api/fhir/server/patient-profile-methods';
 import '../../api/processing/server/methods';
 
 // Configure accounts
@@ -39,6 +40,23 @@ Accounts.onCreateUser(function(options, user) {
   };
   
   return user;
+});
+
+// Hook to create FHIR Patient record when user is created
+Accounts.onLogin(async function(loginInfo) {
+  if (loginInfo.type === 'password' && loginInfo.user) {
+    const userId = loginInfo.user._id;
+    
+    // Check if we need to create a patient record
+    setImmediate(async function() {
+      try {
+        await Meteor.call('fhir.createPatientFromUser');
+        console.log(`✅ Ensured patient record exists for user ${userId}`);
+      } catch (error) {
+        console.error(`❌ Error ensuring patient record for user ${userId}:`, error);
+      }
+    });
+  }
 });
 
 // Email configuration

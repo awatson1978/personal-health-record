@@ -1,3 +1,4 @@
+// meteor-v3/imports/ui/components/Header.jsx
 import React from 'react';
 import {
   AppBar,
@@ -16,7 +17,8 @@ import {
   Brightness4 as DarkModeIcon,
   Brightness7 as LightModeIcon,
   Logout as LogoutIcon,
-  Settings as SettingsIcon
+  Settings as SettingsIcon,
+  Person as PersonIcon
 } from '@mui/icons-material';
 import { Meteor } from 'meteor/meteor';
 import { useNavigate } from 'react-router-dom';
@@ -35,6 +37,11 @@ function Header({ onMenuClick, onThemeToggle, darkMode }) {
 
   const handleMenuClose = function() {
     setAnchorEl(null);
+  };
+
+  const handleProfile = function() {
+    navigate('/profile');
+    handleMenuClose();
   };
 
   const handleLogout = function() {
@@ -128,6 +135,10 @@ function Header({ onMenuClick, onThemeToggle, darkMode }) {
               {userName}
             </MenuItem>
             <Divider />
+            <MenuItem onClick={handleProfile}>
+              <PersonIcon sx={{ mr: 2 }} />
+              Profile
+            </MenuItem>
             <MenuItem onClick={handleSettings}>
               <SettingsIcon sx={{ mr: 2 }} />
               Settings

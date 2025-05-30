@@ -23,6 +23,7 @@ import { Settings } from './pages/Settings';
 import { Login } from './pages/Login';
 import { Register } from './pages/Register';
 import { ExportPreview } from './pages/ExportPreview';
+import { Profile } from './pages/Profile';
 
 // Constants
 const DRAWER_WIDTH = 240;
@@ -217,6 +218,7 @@ function App() {
                       <Route path="/" element={<Dashboard />} />
                       <Route path="/timeline" element={<Timeline />} />
                       <Route path="/import" element={<Import />} />
+                      <Route path="/profile" element={<Profile />} />
                       <Route path="/settings" element={<Settings />} />
                       <Route path="/export-preview" element={<ExportPreview />} />
                       <Route path="*" element={<Navigate to="/" replace />} />
