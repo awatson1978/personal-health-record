@@ -1,11 +1,15 @@
+// meteor-v3/imports/startup/server/index.js
 import { Meteor } from 'meteor/meteor';
 import { Accounts } from 'meteor/accounts-base';
 import { check } from 'meteor/check';
 
 // Import API
 import '../../api/users/server/publications';
+import '../../api/users/server/methods';
 import '../../api/facebook/server/methods';
 import '../../api/fhir/server/methods';
+import '../../api/fhir/server/dashboard-methods';
+import '../../api/fhir/server/timeline-methods';
 import '../../api/processing/server/methods';
 
 // Configure accounts

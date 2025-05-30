@@ -44,7 +44,14 @@ export const EXCLUDED_FILES = [
   'your_group_warnings.json',
   'your_contributions.json',
   'photo_effects.json',
-  'media_used_for_memories.json'
+  'media_used_for_memories.json',
+  'friends_you_see_less.json',
+  'suggested_friends.json',
+  'sent_friend_requests.json',
+  'received_friend_requests.json',
+  'rejected_friend-requests.json',
+  'your_pending_posts_in_groups.json',
+  'your_post_audiences.json'
 ];
 
 // Helper function to check if a file should be excluded

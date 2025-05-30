@@ -16,7 +16,9 @@ import {
   LinearProgress,
   Alert,
   Button,
-  Fab
+  Fab,
+  Skeleton,
+  Avatar
 } from '@mui/material';
 
 import {
@@ -27,113 +29,127 @@ import {
   LocalHospital as HealthIcon,
   Photo as PhotoIcon,
   Message as MessageIcon,
-  Add as AddIcon
+  Add as AddIcon,
+  Refresh as RefreshIcon
 } from '@mui/icons-material';
 
 import { useNavigate } from 'react-router-dom';
 
-import { 
-  Patients, 
-  Communications, 
-  ClinicalImpressions, 
-  Media, 
-  Persons,
-  ImportJobs 
-} from '../../api/fhir/collections';
-
+import { ImportJobs } from '../../api/fhir/collections';
 import { StatCard } from '../components/StatCard';
-import { RecentActivity } from '../components/RecentActivity';
 import { QuickActions } from '../components/QuickActions';
 import { ImportProgress } from '../components/ImportProgress';
 
 function Dashboard() {
   const navigate = useNavigate();
-  const [recentImports, setRecentImports] = useState([]);
+  
+  // Server-side statistics state
+  const [stats, setStats] = useState(null);
+  const [recentActivity, setRecentActivity] = useState(null);
+  const [loadingStats, setLoadingStats] = useState(true);
+  const [loadingActivity, setLoadingActivity] = useState(true);
+  const [statsError, setStatsError] = useState(null);
 
-  const { 
-    stats, 
-    recentClinicalImpressions, 
-    recentCommunications,
-    activeImports,
-    isLoading 
-  } = useTracker(function() {
+  // Client-side reactive data for imports only
+  const { activeImports, isLoading: importsLoading } = useTracker(function() {
     const userId = Meteor.userId();
     if (!userId) return { isLoading: true };
 
-    // Subscribe to user data with higher limits
-    const patientsHandle = Meteor.subscribe('user.patients');
-    const communicationsHandle = Meteor.subscribe('user.communications', 50);
-    const clinicalHandle = Meteor.subscribe('user.clinicalImpressions', 50);
-    const mediaHandle = Meteor.subscribe('user.media', 20);
-    const personsHandle = Meteor.subscribe('user.persons', 50); // FIXED: Add persons subscription
     const importsHandle = Meteor.subscribe('user.imports');
-
-    const isLoading = !patientsHandle.ready() || 
-                    !communicationsHandle.ready() || 
-                    !clinicalHandle.ready() ||
-                    !mediaHandle.ready() ||
-                    !personsHandle.ready() ||
-                    !importsHandle.ready();
+    const isLoading = !importsHandle.ready();
 
     if (isLoading) return { isLoading: true };
 
-    // FIXED: Get statistics for corrected FHIR mappings
-    const allCommunications = Communications.find({ userId }).fetch(); // Messages -> Communications
-    const allClinicalImpressions = ClinicalImpressions.find({ userId }).fetch(); // Posts -> ClinicalImpressions
-    const allMedia = Media.find({ userId }).fetch(); // Photos -> Media
-    const allPersons = Persons.find({ userId }).fetch(); // FIXED: Friends -> Persons
-    const allImports = ImportJobs.find({ userId, status: 'completed' }).fetch();
-
-    const stats = {
-      totalCommunications: allCommunications.length,
-      totalClinicalImpressions: allClinicalImpressions.length,
-      totalMedia: allMedia.length,
-      totalPersons: allPersons.length // FIXED: Changed from imports to persons
-    };
-
-    // Debug logging with corrected mappings
-    console.log('📊 Dashboard stats (corrected FHIR mappings):', stats);
-    console.log('💬 Communications (from messages):', allCommunications.slice(0, 2));
-    console.log('🏥 Clinical Impressions (from posts):', allClinicalImpressions.slice(0, 2));
-    console.log('📸 Media (from photos):', allMedia.slice(0, 2));
-    console.log('👥 Persons (from friends):', allPersons.slice(0, 2));
-
-    // Get recent data for display
-    const recentClinicalImpressions = ClinicalImpressions.find(
-      { userId },
-      { sort: { date: -1 }, limit: 20 }
-    ).fetch();
-
-    const recentCommunications = Communications.find(
-      { userId },
-      { sort: { sent: -1 }, limit: 20 }
-    ).fetch();
-
-    // Get active imports
     const activeImports = ImportJobs.find(
       { userId, status: { $in: ['pending', 'processing'] } },
       { sort: { createdAt: -1 } }
     ).fetch();
 
     return {
-      stats,
-      recentClinicalImpressions,
-      recentCommunications,
       activeImports,
       isLoading: false
     };
   }, []);
 
-  // Fetch recent imports on component mount
+  // Load server-side statistics
+  const loadStatistics = async function() {
+    setLoadingStats(true);
+    setStatsError(null);
+    
+    try {
+      console.log('📊 Loading server-side statistics...');
+      
+      const result = await new Promise(function(resolve, reject) {
+        Meteor.call('dashboard.getStatistics', function(error, result) {
+          if (error) reject(error);
+          else resolve(result);
+        });
+      });
+      
+      setStats(result);
+      console.log('✅ Server-side statistics loaded:', result);
+      
+    } catch (error) {
+      console.error('❌ Error loading statistics:', error);
+      setStatsError(error.reason || error.message);
+    } finally {
+      setLoadingStats(false);
+    }
+  };
+
+  // Load recent activity
+  const loadRecentActivity = async function() {
+    setLoadingActivity(true);
+    
+    try {
+      console.log('📊 Loading recent activity...');
+      
+      const result = await new Promise(function(resolve, reject) {
+        Meteor.call('dashboard.getRecentActivity', 15, function(error, result) {
+          if (error) reject(error);
+          else resolve(result);
+        });
+      });
+      
+      setRecentActivity(result);
+      console.log('✅ Recent activity loaded:', result);
+      
+    } catch (error) {
+      console.error('❌ Error loading recent activity:', error);
+    } finally {
+      setLoadingActivity(false);
+    }
+  };
+
+  // Load data on component mount and when user changes
   useEffect(function() {
     if (Meteor.userId()) {
-      Meteor.call('facebook.getUserImports', function(error, result) {
-        if (!error) {
-          setRecentImports(result || []);
-        }
-      });
+      console.log('🚀 Initial load of dashboard data');
+      loadStatistics();
+      loadRecentActivity();
     }
-  }, []);
+  }, [Meteor.userId()]); // Only depend on userId changes
+
+  // Auto-refresh stats when imports complete (but prevent infinite loops)
+  const [lastRefreshTime, setLastRefreshTime] = useState(0);
+  
+  useEffect(function() {
+    const now = Date.now();
+    // Only refresh if no active imports, we have stats, not currently loading, and haven't refreshed recently
+    if (activeImports && activeImports.length === 0 && stats && !loadingStats && 
+        (now - lastRefreshTime) > 10000) { // 10 second cooldown
+      
+      console.log('🔄 Auto-refreshing stats after import completion');
+      setLastRefreshTime(now);
+      
+      const timer = setTimeout(function() {
+        loadStatistics();
+        loadRecentActivity();
+      }, 2000);
+      
+      return function() { clearTimeout(timer); };
+    }
+  }, [activeImports?.length, lastRefreshTime]);
 
   const quickActions = [
     {
@@ -159,7 +175,12 @@ function Dashboard() {
     }
   ];
 
-  if (isLoading) {
+  const handleRefreshStats = function() {
+    loadStatistics();
+    loadRecentActivity();
+  };
+
+  if (importsLoading && loadingStats) {
     return (
       <Container maxWidth="xl" sx={{ mt: 4, mb: 4 }}>
         <Box display="flex" justifyContent="center" alignItems="center" minHeight="60vh">
@@ -169,22 +190,51 @@ function Dashboard() {
     );
   }
 
-  const hasData = stats.totalCommunications > 0 || stats.totalClinicalImpressions > 0 || stats.totalMedia > 0 || stats.totalPersons > 0;
+  const hasData = stats && (
+    stats.totalCommunications > 0 || 
+    stats.totalClinicalImpressions > 0 || 
+    stats.totalMedia > 0 || 
+    stats.totalPersons > 0
+  );
 
   return (
     <Container maxWidth="xl" sx={{ mt: 4, mb: 4 }}>
       {/* Welcome Header */}
       <Box mb={4}>
-        <Typography variant="h3" component="h1" gutterBottom>
-          Social Media Health Parser
-        </Typography>
-        <Typography variant="subtitle1" color="text.secondary">
-          Welcome back! Here's your health data overview mapped to FHIR resources.
-        </Typography>
+        <Box display="flex" justifyContent="space-between" alignItems="flex-start">
+          <Box>
+            <Typography variant="h3" component="h1" gutterBottom>
+              Facebook FHIR Timeline
+            </Typography>
+            <Typography variant="subtitle1" color="text.secondary">
+              Your social media data transformed into structured health records using FHIR standards.
+            </Typography>
+          </Box>
+          
+          <Button
+            variant="outlined"
+            startIcon={<RefreshIcon />}
+            onClick={handleRefreshStats}
+            disabled={loadingStats}
+          >
+            {loadingStats ? 'Refreshing...' : 'Refresh'}
+          </Button>
+        </Box>
       </Box>
 
+      {/* Stats Error Alert */}
+      {statsError && (
+        <Alert severity="error" sx={{ mb: 3 }} action={
+          <Button color="inherit" size="small" onClick={handleRefreshStats}>
+            Retry
+          </Button>
+        }>
+          Error loading statistics: {statsError}
+        </Alert>
+      )}
+
       {/* Active Imports Alert */}
-      {activeImports.length > 0 && (
+      {activeImports && activeImports.length > 0 && (
         <Alert severity="info" sx={{ mb: 3 }}>
           <Typography variant="body2">
             {activeImports.length} import{activeImports.length > 1 ? 's' : ''} currently processing...
@@ -192,43 +242,86 @@ function Dashboard() {
         </Alert>
       )}
 
-      {/* FIXED: Statistics Cards with Corrected FHIR Mappings */}
+      {/* Statistics Cards - Server Side Data */}
       <Grid container spacing={3} sx={{ mb: 4 }}>
         <Grid item xs={12} sm={6} md={3}>
-          <StatCard
-            title="Communications"
-            value={stats.totalCommunications}
-            icon={<MessageIcon />}
-            color="primary"
-            description="From Facebook messages"
-          />
+          {loadingStats ? (
+            <Card sx={{ height: '100%' }}>
+              <CardContent>
+                <Skeleton variant="text" width="60%" />
+                <Skeleton variant="text" width="40%" height={40} />
+                <Skeleton variant="text" width="80%" />
+              </CardContent>
+            </Card>
+          ) : (
+            <StatCard
+              title="Communications"
+              value={get(stats, 'totalCommunications', 0)}
+              icon={<MessageIcon />}
+              color="primary"
+              description="From Facebook messages"
+            />
+          )}
         </Grid>
+        
         <Grid item xs={12} sm={6} md={3}>
-          <StatCard
-            title="Clinical Impressions"
-            value={stats.totalClinicalImpressions}
-            icon={<HealthIcon />}
-            color="error"
-            description="From Facebook posts"
-          />
+          {loadingStats ? (
+            <Card sx={{ height: '100%' }}>
+              <CardContent>
+                <Skeleton variant="text" width="60%" />
+                <Skeleton variant="text" width="40%" height={40} />
+                <Skeleton variant="text" width="80%" />
+              </CardContent>
+            </Card>
+          ) : (
+            <StatCard
+              title="Health Records"
+              value={get(stats, 'totalClinicalImpressions', 0)}
+              icon={<HealthIcon />}
+              color="error"
+              description="From Facebook posts"
+            />
+          )}
         </Grid>
+        
         <Grid item xs={12} sm={6} md={3}>
-          <StatCard
-            title="Media Files"
-            value={stats.totalMedia}
-            icon={<PhotoIcon />}
-            color="warning"
-            description="From Facebook photos"
-          />
+          {loadingStats ? (
+            <Card sx={{ height: '100%' }}>
+              <CardContent>
+                <Skeleton variant="text" width="60%" />
+                <Skeleton variant="text" width="40%" height={40} />
+                <Skeleton variant="text" width="80%" />
+              </CardContent>
+            </Card>
+          ) : (
+            <StatCard
+              title="Media Files"
+              value={get(stats, 'totalMedia', 0)}
+              icon={<PhotoIcon />}
+              color="warning"
+              description="From Facebook photos"
+            />
+          )}
         </Grid>
+        
         <Grid item xs={12} sm={6} md={3}>
-          <StatCard
-            title="Persons"
-            value={stats.totalPersons}
-            icon={<PersonIcon />}
-            color="success"
-            description="From Facebook friends"
-          />
+          {loadingStats ? (
+            <Card sx={{ height: '100%' }}>
+              <CardContent>
+                <Skeleton variant="text" width="60%" />
+                <Skeleton variant="text" width="40%" height={40} />
+                <Skeleton variant="text" width="80%" />
+              </CardContent>
+            </Card>
+          ) : (
+            <StatCard
+              title="Contacts"
+              value={get(stats, 'totalPersons', 0)}
+              icon={<PersonIcon />}
+              color="success"
+              description="From Facebook friends"
+            />
+          )}
         </Grid>
       </Grid>
 
@@ -237,7 +330,7 @@ function Dashboard() {
         {/* Left Column */}
         <Grid item xs={12} lg={8}>
           {/* Active Import Progress */}
-          {activeImports.length > 0 && (
+          {activeImports && activeImports.length > 0 && (
             <Card sx={{ mb: 3 }}>
               <CardContent>
                 <Typography variant="h6" gutterBottom>
@@ -267,20 +360,77 @@ function Dashboard() {
                     View All
                   </Button>
                 </Box>
+                
                 <Alert severity="info" sx={{ mb: 2 }}>
                   <Typography variant="body2">
-                    <strong>Note:</strong> Health Records come from Facebook posts, Communications from messages
+                    <strong>FHIR Mapping:</strong> Posts → Clinical Records, Messages → Communications, 
+                    Photos → Media, Friends → Contacts
                   </Typography>
                 </Alert>
-                <RecentActivity
-                  clinicalImpressions={recentClinicalImpressions}
-                  communications={recentCommunications}
-                  limit={10}
-                  showPagination={false}
-                />
+                
+                {loadingActivity ? (
+                  <Box>
+                    {[1, 2, 3].map(function(item) {
+                      return (
+                        <Box key={item} sx={{ mb: 2 }}>
+                          <Skeleton variant="text" width="80%" />
+                          <Skeleton variant="text" width="40%" />
+                        </Box>
+                      );
+                    })}
+                  </Box>
+                ) : recentActivity && recentActivity.activities ? (
+                  <Box>
+                    {recentActivity.activities.slice(0, 10).map(function(activity, index) {
+                      const resourceInfo = activity.type === 'clinical' ? 
+                        { icon: <HealthIcon />, color: 'error', label: 'Health Record' } :
+                        { icon: <MessageIcon />, color: 'primary', label: 'Communication' };
+                      
+                      const content = activity.type === 'clinical' ? 
+                        get(activity, 'description', 'Clinical impression') :
+                        get(activity, 'payload.0.contentString', 'Communication');
+
+                      return (
+                        <Box key={activity._id || index} sx={{ 
+                          border: 1, 
+                          borderColor: 'divider', 
+                          borderRadius: 1, 
+                          mb: 1,
+                          p: 2
+                        }}>
+                          <Box display="flex" alignItems="center" sx={{ mb: 1 }}>
+                            <Avatar sx={{ bgcolor: `${resourceInfo.color}.main`, mr: 2, width: 32, height: 32 }}>
+                              {resourceInfo.icon}
+                            </Avatar>
+                            <Box sx={{ flex: 1 }}>
+                              <Typography variant="body2" sx={{ fontWeight: 500 }}>
+                                {content.length > 80 ? content.substring(0, 80) + '...' : content}
+                              </Typography>
+                              <Box display="flex" alignItems="center" gap={1} sx={{ mt: 0.5 }}>
+                                <Chip 
+                                  label={resourceInfo.label} 
+                                  size="small" 
+                                  color={resourceInfo.color}
+                                  variant="outlined"
+                                />
+                                <Typography variant="caption" color="text.secondary">
+                                  {activity.relativeDate || moment(activity.sortDate).fromNow()}
+                                </Typography>
+                              </Box>
+                            </Box>
+                          </Box>
+                        </Box>
+                      );
+                    })}
+                  </Box>
+                ) : (
+                  <Typography color="text.secondary" align="center" sx={{ py: 4 }}>
+                    No recent activity found
+                  </Typography>
+                )}
               </CardContent>
             </Card>
-          ) : (
+          ) : !loadingStats ? (
             <Card>
               <CardContent sx={{ textAlign: 'center', py: 6 }}>
                 <UploadIcon sx={{ fontSize: 64, color: 'text.secondary', mb: 2 }} />
@@ -292,7 +442,7 @@ function Dashboard() {
                 </Typography>
                 <Typography variant="body2" color="text.secondary" paragraph>
                   <strong>FHIR Mappings:</strong> Posts → Clinical Records, Messages → Communications, 
-                  Photos → Media, Friends → Persons
+                  Photos → Media, Friends → Contacts
                 </Typography>
                 <Button
                   variant="contained"
@@ -302,6 +452,13 @@ function Dashboard() {
                 >
                   Import Facebook Data
                 </Button>
+              </CardContent>
+            </Card>
+          ) : (
+            <Card>
+              <CardContent>
+                <Skeleton variant="text" width="60%" height={40} />
+                <Skeleton variant="rectangular" width="100%" height={200} />
               </CardContent>
             </Card>
           )}
@@ -319,56 +476,65 @@ function Dashboard() {
             </CardContent>
           </Card>
 
-          {/* Recent Imports */}
-          {recentImports.length > 0 && (
-            <Card>
+          {/* Statistics Summary */}
+          {stats && (
+            <Card sx={{ mb: 3 }}>
               <CardContent>
                 <Typography variant="h6" gutterBottom>
-                  Recent Imports
+                  Data Summary
                 </Typography>
                 <Box>
-                  {recentImports.slice(0, 5).map(function(importJob) {
-                    return (
-                      <Box key={importJob._id} sx={{ mb: 2 }}>
-                        <Box display="flex" justifyContent="space-between" alignItems="center">
-                          <Typography variant="body2" noWrap sx={{ flex: 1, mr: 1 }}>
-                            {importJob.filename}
-                          </Typography>
-                          <Chip
-                            label={importJob.status}
-                            size="small"
-                            color={
-                              importJob.status === 'completed' ? 'success' :
-                              importJob.status === 'failed' ? 'error' :
-                              importJob.status === 'processing' ? 'warning' : 'default'
-                            }
-                          />
-                        </Box>
-                        <Typography variant="caption" color="text.secondary">
-                          {moment(importJob.createdAt).format('MMM DD, YYYY HH:mm')}
-                        </Typography>
-                        {importJob.results && (
-                          <Typography variant="caption" display="block" color="text.secondary">
-                            {get(importJob.results, 'communications', 0)} messages, {' '}
-                            {get(importJob.results, 'clinicalImpressions', 0)} posts, {' '}
-                            {get(importJob.results, 'media', 0)} photos, {' '}
-                            {get(importJob.results, 'persons', 0)} friends
-                          </Typography>
-                        )}
-                      </Box>
-                    );
-                  })}
+                  <Typography variant="body2" color="text.secondary" paragraph>
+                    <strong>Total Records:</strong> {
+                      stats.totalCommunications + 
+                      stats.totalClinicalImpressions + 
+                      stats.totalMedia + 
+                      stats.totalPersons
+                    }
+                  </Typography>
+                  
+                  {stats.completedImports > 0 && (
+                    <Typography variant="body2" color="text.secondary" paragraph>
+                      <strong>Completed Imports:</strong> {stats.completedImports}
+                    </Typography>
+                  )}
+                  
+                  <Typography variant="caption" color="text.secondary">
+                    Last updated: {moment(stats.lastUpdated).fromNow()}
+                  </Typography>
                 </Box>
-                <Button
-                  size="small"
-                  onClick={function() { navigate('/import'); }}
-                  sx={{ mt: 1 }}
-                >
-                  View All Imports
-                </Button>
               </CardContent>
             </Card>
           )}
+
+          {/* FHIR Resource Info */}
+          <Card>
+            <CardContent>
+              <Typography variant="h6" gutterBottom>
+                FHIR Resources
+              </Typography>
+              <Typography variant="body2" color="text.secondary" paragraph>
+                Your Facebook data is mapped to standard FHIR (Fast Healthcare Interoperability Resources) format:
+              </Typography>
+              <Box component="ul" sx={{ pl: 2, mt: 1 }}>
+                <Typography component="li" variant="body2" sx={{ mb: 0.5 }}>
+                  <strong>Patient:</strong> Your profile information
+                </Typography>
+                <Typography component="li" variant="body2" sx={{ mb: 0.5 }}>
+                  <strong>Communication:</strong> Messages and conversations
+                </Typography>
+                <Typography component="li" variant="body2" sx={{ mb: 0.5 }}>
+                  <strong>ClinicalImpression:</strong> Health-related posts
+                </Typography>
+                <Typography component="li" variant="body2" sx={{ mb: 0.5 }}>
+                  <strong>Media:</strong> Photos and videos
+                </Typography>
+                <Typography component="li" variant="body2">
+                  <strong>Person:</strong> Friends and contacts
+                </Typography>
+              </Box>
+            </CardContent>
+          </Card>
         </Grid>
       </Grid>
 
