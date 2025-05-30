@@ -15,7 +15,6 @@ import Sidebar from './components/Sidebar';
 import { LoadingScreen } from './components/LoadingScreen';
 import { ErrorBoundary } from './components/ErrorBoundary';
 
-// Pages - Import directly, not from index
 import Dashboard from './pages/Dashboard';
 import { Timeline } from './pages/Timeline';
 import Import from './pages/Import';
@@ -24,6 +23,7 @@ import { Login } from './pages/Login';
 import { Register } from './pages/Register';
 import { ExportPreview } from './pages/ExportPreview';
 import { Profile } from './pages/Profile';
+import { PersonsPage } from './pages/Persons';
 
 // Constants
 const DRAWER_WIDTH = 240;
@@ -219,6 +219,7 @@ function App() {
                       <Route path="/timeline" element={<Timeline />} />
                       <Route path="/import" element={<Import />} />
                       <Route path="/profile" element={<Profile />} />
+                      <Route path="/persons" element={<PersonsPage />} />
                       <Route path="/settings" element={<Settings />} />
                       <Route path="/export-preview" element={<ExportPreview />} />
                       <Route path="*" element={<Navigate to="/" replace />} />

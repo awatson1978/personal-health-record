@@ -315,15 +315,16 @@ export function ExportPreview() {
   const getDisplayData = function() {
     if (!exportData) {
       return '// No export data available\n// Debug info below:\n' + 
-             JSON.stringify(debugInfo, null, 2);
+            JSON.stringify(debugInfo, null, 2);
     }
     
     try {
+      const maxRows = exportSettings.displayRows === -1 ? Infinity : exportSettings.displayRows;
+      
       if (exportSettings.format === 'ndjson') {
         // Convert to NDJSON format - each resource on its own line
         const lines = [];
         let resourceCount = 0;
-        const maxRows = exportSettings.displayRows === -1 ? Infinity : exportSettings.displayRows;
         
         if (exportData.bundle && exportData.bundle.entry) {
           for (const entry of exportData.bundle.entry) {
@@ -335,12 +336,30 @@ export function ExportPreview() {
             }
           }
         } else if (exportData.resources) {
-          for (const resource of exportData.resources) {
-            if (resourceCount < maxRows) {
-              lines.push(JSON.stringify(resource, null, 0));
-              resourceCount++;
-            } else {
-              break;
+          // Handle array of resources
+          if (Array.isArray(exportData.resources)) {
+            for (const resource of exportData.resources) {
+              if (resourceCount < maxRows) {
+                lines.push(JSON.stringify(resource, null, 0));
+                resourceCount++;
+              } else {
+                break;
+              }
+            }
+          } else {
+            // Handle object with resource types as keys
+            for (const [resourceType, resourceArray] of Object.entries(exportData.resources)) {
+              if (Array.isArray(resourceArray)) {
+                for (const resource of resourceArray) {
+                  if (resourceCount < maxRows) {
+                    lines.push(JSON.stringify(resource, null, 0));
+                    resourceCount++;
+                  } else {
+                    break;
+                  }
+                }
+                if (resourceCount >= maxRows) break;
+              }
             }
           }
         }
@@ -351,10 +370,10 @@ export function ExportPreview() {
         }
         
         return lines.join('\n');
+        
       } else {
         // Regular JSON format with truncation
         let dataToDisplay = exportData;
-        const maxRows = exportSettings.displayRows === -1 ? Infinity : exportSettings.displayRows;
         
         // Truncate if we have too many resources
         if (exportData.bundle && exportData.bundle.entry && exportData.bundle.entry.length > maxRows) {
@@ -368,6 +387,53 @@ export function ExportPreview() {
             displayedResources: maxRows,
             totalResources: exportData.bundle.entry.length
           };
+        } else if (exportData.resources) {
+          // Handle resources object truncation
+          const truncatedResources = {};
+          let totalResourceCount = 0;
+          let displayedResourceCount = 0;
+          
+          // Count total resources first
+          if (Array.isArray(exportData.resources)) {
+            totalResourceCount = exportData.resources.length;
+            if (totalResourceCount > maxRows) {
+              dataToDisplay = {
+                ...exportData,
+                resources: exportData.resources.slice(0, maxRows),
+                truncated: true,
+                displayedResources: maxRows,
+                totalResources: totalResourceCount
+              };
+            }
+          } else {
+            // Handle object with resource types
+            for (const [type, resources] of Object.entries(exportData.resources)) {
+              if (Array.isArray(resources)) {
+                totalResourceCount += resources.length;
+              }
+            }
+            
+            if (totalResourceCount > maxRows) {
+              // Truncate across resource types
+              for (const [type, resources] of Object.entries(exportData.resources)) {
+                if (Array.isArray(resources) && displayedResourceCount < maxRows) {
+                  const remainingSlots = maxRows - displayedResourceCount;
+                  truncatedResources[type] = resources.slice(0, remainingSlots);
+                  displayedResourceCount += Math.min(resources.length, remainingSlots);
+                } else if (displayedResourceCount < maxRows) {
+                  truncatedResources[type] = resources;
+                }
+              }
+              
+              dataToDisplay = {
+                ...exportData,
+                resources: truncatedResources,
+                truncated: true,
+                displayedResources: displayedResourceCount,
+                totalResources: totalResourceCount
+              };
+            }
+          }
         }
         
         return JSON.stringify(dataToDisplay, null, exportSettings.prettyPrint ? 2 : 0);
@@ -376,6 +442,8 @@ export function ExportPreview() {
       return `Error formatting data: ${error.message}\n\nDebug info:\n${JSON.stringify(debugInfo, null, 2)}`;
     }
   };
+
+
 
   // Get file size estimate
   const getFileSizeEstimate = function() {

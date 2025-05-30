@@ -7,3 +7,4 @@ export { Login } from './Login';
 export { Register } from './Register';
 export { ExportPreview } from './ExportPreview';
 export { Profile } from './Profile';
+export { PersonsPage } from './Persons';
