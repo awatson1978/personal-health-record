@@ -10,6 +10,7 @@ import '../../api/facebook/server/methods';
 import '../../api/fhir/server/methods';
 import '../../api/fhir/server/dashboard-methods';
 import '../../api/fhir/server/timeline-methods';
+import '../../api/fhir/server/export-methods';
 import '../../api/processing/server/methods';
 
 // Configure accounts

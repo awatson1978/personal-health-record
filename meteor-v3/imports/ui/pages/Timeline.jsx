@@ -57,8 +57,11 @@ import {
   Media, 
   Persons 
 } from '../../api/fhir/collections';
+import { useNavigate } from 'react-router-dom';
 
 export function Timeline() {
+  const navigate = useNavigate();
+  
   // State management
   const [timelineData, setTimelineData] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -222,31 +225,36 @@ export function Timeline() {
     });
   };
 
-  // Export timeline data
-  const handleExport = async function() {
-    try {
-      const result = await new Promise(function(resolve, reject) {
-        Meteor.call('timeline.exportData', filters, function(error, result) {
-          if (error) reject(error);
-          else resolve(result);
-        });
-      });
-      
-      // Create download link
-      const blob = new Blob([JSON.stringify(result, null, 2)], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `timeline-export-${moment().format('YYYY-MM-DD')}.json`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-      
-    } catch (error) {
-      console.error('Export error:', error);
-      setError('Failed to export timeline data: ' + (error.reason || error.message));
+  // Navigate to export preview with current filters
+  const handleExportPreview = function() {
+    // Build query params from current filters
+    const queryParams = new URLSearchParams();
+    
+    if (filters.dateRange.start) {
+      queryParams.set('startDate', filters.dateRange.start.toISOString());
     }
+    if (filters.dateRange.end) {
+      queryParams.set('endDate', filters.dateRange.end.toISOString());
+    }
+    if (filters.resourceType !== 'all') {
+      queryParams.set('resourceType', filters.resourceType);
+    }
+    if (filters.searchQuery) {
+      queryParams.set('searchQuery', filters.searchQuery);
+    }
+    if (filters.sortBy !== 'date') {
+      queryParams.set('sortBy', filters.sortBy);
+    }
+    if (filters.sortOrder !== 'desc') {
+      queryParams.set('sortOrder', filters.sortOrder);
+    }
+
+    const queryString = queryParams.toString();
+    const exportUrl = `/export-preview${queryString ? '?' + queryString : ''}`;
+    
+    navigate(exportUrl, {
+      state: { filters: filters }
+    });
   };
 
   // Get resource type icon and color
@@ -422,7 +430,7 @@ export function Timeline() {
             <Button
               variant="outlined"
               startIcon={<DownloadIcon />}
-              onClick={handleExport}
+              onClick={handleExportPreview}
               disabled={loading || timelineData.length === 0}
             >
               Export
@@ -484,7 +492,7 @@ export function Timeline() {
                 </Select>
               </FormControl>
 
-              {/* Date Range */}
+              {/* Date Range - FIXED DatePicker implementation */}
               <Typography variant="subtitle2" sx={{ mb: 1 }}>
                 Date Range
               </Typography>
@@ -493,14 +501,32 @@ export function Timeline() {
                 label="Start Date"
                 value={filters.dateRange.start}
                 onChange={function(date) { handleNestedFilterChange('dateRange', 'start', date); }}
-                slotProps={{ textField: { fullWidth: true, size: 'small', sx: { mb: 1 } } }}
+                slots={{
+                  textField: TextField
+                }}
+                slotProps={{
+                  textField: {
+                    fullWidth: true,
+                    size: 'small',
+                    sx: { mb: 1 }
+                  }
+                }}
               />
               
               <DatePicker
                 label="End Date"
                 value={filters.dateRange.end}
                 onChange={function(date) { handleNestedFilterChange('dateRange', 'end', date); }}
-                slotProps={{ textField: { fullWidth: true, size: 'small', sx: { mb: 2 } } }}
+                slots={{
+                  textField: TextField
+                }}
+                slotProps={{
+                  textField: {
+                    fullWidth: true,
+                    size: 'small',
+                    sx: { mb: 2 }
+                  }
+                }}
               />
 
               {/* Sort Options */}
