@@ -1,5 +1,5 @@
 // meteor-v3/imports/ui/pages/ExportPreview.jsx
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Meteor } from 'meteor/meteor';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { get } from 'lodash';
@@ -89,7 +89,7 @@ export function ExportPreview() {
   const [debugInfo, setDebugInfo] = useState(null);
   const [performanceWarningShown, setPerformanceWarningShown] = useState(false);
   
-  // ENHANCED: Export settings with expanded limits up to 1 million
+  // FIXED: Export settings with proper state management
   const [exportSettings, setExportSettings] = useState({
     format: 'ndjson',
     prettyPrint: true,
@@ -98,7 +98,7 @@ export function ExportPreview() {
     fontSize: 14,
     wordWrap: false,
     resourceTypes: ['all'],
-    displayRows: 1000 // ENHANCED: Increased default to 1000
+    displayRows: 1000
   });
 
   // Filename state
@@ -106,11 +106,11 @@ export function ExportPreview() {
     return `fhir-export-${moment().format('YYYY-MM-DD-HHmm')}`;
   });
 
-  // ENHANCED: Performance warning dialog state
+  // Performance warning dialog state
   const [performanceDialogOpen, setPerformanceDialogOpen] = useState(false);
   const [pendingDisplayRows, setPendingDisplayRows] = useState(null);
 
-  // ENHANCED: Get display options with performance warnings
+  // Get display options with performance warnings
   const getDisplayRowsOptions = function() {
     return [
       { value: 50, label: '50 rows', performance: 'fast' },
@@ -126,7 +126,7 @@ export function ExportPreview() {
     ];
   };
 
-  // ENHANCED: Get performance info for a given row count
+  // Get performance info for a given row count
   const getPerformanceInfo = function(rowCount) {
     if (rowCount === -1) return { level: 'extremely-slow', warning: 'May cause browser to freeze with large datasets' };
     if (rowCount >= 1000000) return { level: 'extremely-slow', warning: 'Very large dataset - may take 30+ seconds to render' };
@@ -136,8 +136,9 @@ export function ExportPreview() {
     return { level: 'fast', warning: null };
   };
 
-  // ENHANCED: Handle display rows change with performance warning
+  // Handle display rows change with performance warning
   const handleDisplayRowsChange = function(newValue) {
+    console.log('🔍 DEBUG: handleDisplayRowsChange called with:', newValue);
     const performanceInfo = getPerformanceInfo(newValue);
     
     // Show warning for slow performance options
@@ -150,12 +151,14 @@ export function ExportPreview() {
     }
     
     // Apply the change immediately for fast options
+    console.log('🔍 DEBUG: Applying displayRows change immediately:', newValue);
     handleSettingChange('displayRows', newValue);
   };
 
-  // ENHANCED: Confirm performance warning and apply setting
+  // Confirm performance warning and apply setting
   const confirmPerformanceChange = function() {
     if (pendingDisplayRows !== null) {
+      console.log('🔍 DEBUG: Confirming performance change to:', pendingDisplayRows);
       handleSettingChange('displayRows', pendingDisplayRows);
       setPerformanceWarningShown(true);
       setPerformanceDialogOpen(false);
@@ -163,8 +166,9 @@ export function ExportPreview() {
     }
   };
 
-  // ENHANCED: Cancel performance warning
+  // Cancel performance warning
   const cancelPerformanceChange = function() {
+    console.log('🔍 DEBUG: Cancelling performance change');
     setPerformanceDialogOpen(false);
     setPendingDisplayRows(null);
   };
@@ -209,7 +213,7 @@ export function ExportPreview() {
         
         console.log('🔍 DEBUG: We have data, calling export.generatePreview...');
         
-        // ENHANCED: Calculate server limit based on displayRows, capped at reasonable server limits
+        // Calculate server limit based on displayRows, capped at reasonable server limits
         const serverLimit = exportSettings.displayRows === -1 ? 50000 : Math.min(exportSettings.displayRows, 50000);
         console.log('🔍 DEBUG: Using server limit:', serverLimit, 'for displayRows:', exportSettings.displayRows);
         
@@ -219,7 +223,7 @@ export function ExportPreview() {
             format: exportSettings.format,
             includeMetadata: exportSettings.includeMetadata,
             resourceTypes: exportSettings.resourceTypes,
-            previewLimit: serverLimit // ENHANCED: Use calculated server limit
+            previewLimit: serverLimit
           }, function(error, result) {
             if (error) {
               console.error('🔍 DEBUG: Error in export.generatePreview:', error);
@@ -267,7 +271,7 @@ export function ExportPreview() {
     } else {
       console.log('🔍 DEBUG: No user ID, skipping load');
     }
-  }, [Meteor.userId(), exportSettings.format, exportSettings.includeMetadata, exportSettings.resourceTypes]);
+  }, [Meteor.userId(), exportSettings.format, exportSettings.includeMetadata, exportSettings.resourceTypes, exportSettings.displayRows]);
 
   // Update filename when format changes
   useEffect(function() {
@@ -276,14 +280,16 @@ export function ExportPreview() {
     setFilename(baseFilename + extension);
   }, [exportSettings.format]);
 
-  // Handle export setting changes
+  // FIXED: Handle export setting changes with proper logging
   const handleSettingChange = function(key, value) {
-    console.log('🔍 DEBUG: Setting change:', key, value);
+    console.log('🔍 DEBUG: Setting change:', key, '=', value);
     setExportSettings(function(prev) {
-      return {
+      const newSettings = {
         ...prev,
         [key]: value
       };
+      console.log('🔍 DEBUG: New export settings:', newSettings);
+      return newSettings;
     });
   };
 
@@ -381,8 +387,13 @@ export function ExportPreview() {
     }
   };
 
-  // ENHANCED: Optimized useMemo with client-side only row limiting (now supports up to 1M)
-  const { displayData, actualDisplayedRows, debugInfo: displayDebugInfo } = React.useMemo(function() {
+  // FIXED: Optimized useMemo with proper dependency array and better structure
+  const { displayData, actualDisplayedRows, debugInfo: displayDebugInfo } = useMemo(function() {
+    console.log('🔍 DEBUG: useMemo recalculating with displayRows:', exportSettings.displayRows);
+    console.log('🔍 DEBUG: useMemo exportData available:', !!exportData);
+    console.log('🔍 DEBUG: useMemo exportSettings.format:', exportSettings.format);
+    console.log('🔍 DEBUG: useMemo exportSettings.prettyPrint:', exportSettings.prettyPrint);
+    
     if (!exportData) {
       return {
         displayData: '// No export data available\n// Debug info below:\n' + 
@@ -393,7 +404,7 @@ export function ExportPreview() {
     }
     
     try {
-      // ENHANCED: Use displayRows for client-side limiting (now supports up to 1M)
+      // Use displayRows for client-side limiting
       const maxRows = exportSettings.displayRows === -1 ? Infinity : exportSettings.displayRows;
       console.log('🔍 DEBUG: Client-side limiting with maxRows:', maxRows, 'format:', exportSettings.format);
       console.log('🔍 DEBUG: exportData keys:', Object.keys(exportData));
@@ -597,26 +608,22 @@ export function ExportPreview() {
         debugInfo: { error: error.message }
       };
     }
-  }, [exportData, exportSettings.displayRows, exportSettings.format, exportSettings.prettyPrint, debugInfo]);
-
-  // Get display data
-  const getDisplayData = function() {
-    return displayData;
-  };
+  }, [
+    exportData, 
+    exportSettings.displayRows, 
+    exportSettings.format, 
+    exportSettings.prettyPrint, 
+    debugInfo
+  ]); // FIXED: Added all necessary dependencies
 
   // Get file size estimate
   const getFileSizeEstimate = function() {
-    const data = getDisplayData();
+    const data = displayData;
     const sizeInBytes = new Blob([data]).size;
     
     if (sizeInBytes < 1024) return `${sizeInBytes} bytes`;
     if (sizeInBytes < 1024 * 1024) return `${(sizeInBytes / 1024).toFixed(1)} KB`;
     return `${(sizeInBytes / (1024 * 1024)).toFixed(1)} MB`;
-  };
-
-  // Get displayed resource count
-  const getDisplayedResourceCount = function() {
-    return actualDisplayedRows;
   };
 
   if (!Meteor.userId()) {
@@ -715,14 +722,14 @@ export function ExportPreview() {
                 </Select>
               </FormControl>
 
-              {/* ENHANCED: Preview Rows Selector with expanded options and performance indicators */}
+              {/* Preview Rows Selector with expanded options and performance indicators */}
               <FormControl fullWidth sx={{ mb: 2 }}>
                 <InputLabel>Preview Rows</InputLabel>
                 <Select
                   value={exportSettings.displayRows}
                   label="Preview Rows"
                   onChange={function(e) { 
-                    console.log('🔍 DEBUG: Preview rows changed to:', e.target.value);
+                    console.log('🔍 DEBUG: Preview rows SELECT onChange to:', e.target.value);
                     handleDisplayRowsChange(e.target.value); 
                   }}
                 >
@@ -744,7 +751,7 @@ export function ExportPreview() {
                 </Select>
               </FormControl>
 
-              {/* ENHANCED: Show performance warning for current selection */}
+              {/* Show performance warning for current selection */}
               {exportSettings.displayRows > 5000 && (
                 <Alert severity="warning" sx={{ mb: 2, fontSize: '0.75rem' }}>
                   <Typography variant="caption">
@@ -863,7 +870,7 @@ export function ExportPreview() {
                     </ListItemIcon>
                     <ListItemText
                       primary="Showing Resources"
-                      secondary={`${getDisplayedResourceCount().toLocaleString()} of ${get(exportData, 'summary.totalResources', 0).toLocaleString()}`}
+                      secondary={`${actualDisplayedRows.toLocaleString()} of ${get(exportData, 'summary.totalResources', 0).toLocaleString()}`}
                     />
                   </ListItem>
                   
@@ -947,7 +954,7 @@ export function ExportPreview() {
                     <Box display="flex" alignItems="center" gap={1}>
                       {/* Chip shows actual displayed count from state */}
                       <Chip
-                        label={`${getDisplayedResourceCount().toLocaleString()} of ${get(exportData, 'summary.totalResources', 0).toLocaleString()} resources`}
+                        label={`${actualDisplayedRows.toLocaleString()} of ${get(exportData, 'summary.totalResources', 0).toLocaleString()} resources`}
                         color="primary"
                         size="small"
                       />
@@ -958,7 +965,7 @@ export function ExportPreview() {
                           size="small"
                         />
                       )}
-                      {/* ENHANCED: Performance indicator */}
+                      {/* Performance indicator */}
                       {exportSettings.displayRows > 10000 && (
                         <Chip
                           label="Large Dataset"
@@ -990,7 +997,7 @@ export function ExportPreview() {
                     showPrintMargin={true}
                     showGutter={true}
                     highlightActiveLine={true}
-                    value={getDisplayData()}
+                    value={displayData}
                     readOnly={true}
                     width="100%"
                     height="100%"
@@ -1028,7 +1035,7 @@ export function ExportPreview() {
         </Grid>
       </Grid>
 
-      {/* ENHANCED: Performance Warning Dialog */}
+      {/* Performance Warning Dialog */}
       <Dialog 
         open={performanceDialogOpen} 
         onClose={cancelPerformanceChange}
