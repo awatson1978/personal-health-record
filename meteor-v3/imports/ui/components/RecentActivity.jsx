@@ -204,7 +204,7 @@ export function RecentActivity({
                   )}
                   
                   <Chip
-                    label={activity.type === 'clinical' ? 'Health' : 'Social'}
+                    label={activity.type === 'clinical' ? 'ClinicalImpression' : 'Communication'}
                     size="small"
                     color={activity.type === 'clinical' ? 'error' : 'primary'}
                     variant="outlined"

@@ -176,10 +176,10 @@ function Dashboard() {
       {/* Welcome Header */}
       <Box mb={4}>
         <Typography variant="h3" component="h1" gutterBottom>
-          Personal Health Timeline
+          Social Media Health Parser
         </Typography>
         <Typography variant="subtitle1" color="text.secondary">
-          Welcome back! Here's your health data overview with correct FHIR mappings.
+          Welcome back! Here's your health data overview mapped to FHIR resources.
         </Typography>
       </Box>
 
