@@ -280,13 +280,13 @@ export function Timeline() {
     
     // Extract content based on resource type
     let content = '';
-    let subtitle = '';
+    let primaryText = '';
     let metadata = {};
     
     switch (item.resourceType) {
       case 'ClinicalImpression':
         content = get(item, 'description', 'Clinical impression');
-        subtitle = `Health record from ${moment(item.date).format('MMM DD, YYYY')}`;
+        primaryText = `Health record from ${moment(item.date).format('MMM DD, YYYY')}`;
         metadata = {
           status: item.status,
           findings: get(item, 'finding', []).length
@@ -294,7 +294,7 @@ export function Timeline() {
         break;
       case 'Communication':
         content = get(item, 'payload.0.contentString', 'Communication');
-        subtitle = `Message from ${moment(item.sent).format('MMM DD, YYYY')}`;
+        primaryText = `Message from ${moment(item.sent).format('MMM DD, YYYY')}`;
         metadata = {
           status: item.status,
           category: get(item, 'category.0.text', 'General')
@@ -302,7 +302,7 @@ export function Timeline() {
         break;
       case 'Media':
         content = get(item, 'content.title', 'Media file');
-        subtitle = `${get(item, 'type.text', 'Media')} from ${moment(item.createdDateTime).format('MMM DD, YYYY')}`;
+        primaryText = `${get(item, 'type.text', 'Media')} from ${moment(item.createdDateTime).format('MMM DD, YYYY')}`;
         metadata = {
           contentType: get(item, 'content.contentType', ''),
           size: get(item, 'content.size', 0)
@@ -310,12 +310,15 @@ export function Timeline() {
         break;
       case 'Person':
         content = get(item, 'name.0.text', 'Person');
-        subtitle = `Contact added ${moment(item.createdAt).format('MMM DD, YYYY')}`;
+        primaryText = `Contact added ${moment(item.createdAt).format('MMM DD, YYYY')}`;
         metadata = {
           active: item.active
         };
         break;
     }
+
+    const needsExpansion = content.length > 80;
+    const displayContent = needsExpansion && !isExpanded ? content.substring(0, 80) + '...' : content;
 
     return (
       <Paper key={item._id} elevation={1} sx={{ mb: 2 }}>
@@ -330,23 +333,19 @@ export function Timeline() {
             
             <ListItemText
               primary={
-                <Box display="flex" alignItems="center" sx={{ mb: 0.5 }}>
-                  <Typography variant="subtitle1" sx={{ mr: 1 }}>
-                    {content.length > 80 && !isExpanded ? content.substring(0, 80) + '...' : content}
-                  </Typography>
-                  <Chip 
-                    label={resourceInfo.label} 
-                    size="small" 
-                    color={resourceInfo.color}
-                    variant="outlined"
-                  />
-                </Box>
+                <Typography variant="subtitle1" sx={{ fontWeight: 500 }}>
+                  {primaryText}
+                </Typography>
               }
-              secondary={subtitle}
+              secondary={
+                <Typography variant="body2" sx={{ mt: 0.5 }}>
+                  {displayContent}
+                </Typography>
+              }
             />
             
             <ListItemSecondaryAction>
-              {content.length > 80 && (
+              {needsExpansion && (
                 <IconButton 
                   edge="end" 
                   onClick={function() { toggleExpanded(item._id); }}
@@ -360,9 +359,7 @@ export function Timeline() {
           {/* Expanded Content */}
           <Collapse in={isExpanded} timeout="auto" unmountOnExit>
             <Box sx={{ pl: 7, pr: 2, pb: 1 }}>
-              <Typography variant="body2" paragraph>
-                {content}
-              </Typography>
+
               
               {/* Metadata */}
               <Box display="flex" flexWrap="wrap" gap={1}>
@@ -567,6 +564,9 @@ export function Timeline() {
                 </Typography>
                 <Box>
                   <Typography variant="body2" sx={{ mb: 1 }}>
+                    <strong>Timeline Results</strong> {timelineData.length} 
+                  </Typography>
+                  <Typography variant="body2" sx={{ mb: 1 }}>
                     <strong>Health Records:</strong> {stats.clinicalImpressions}
                   </Typography>
                   <Typography variant="body2" sx={{ mb: 1 }}>
@@ -619,15 +619,6 @@ export function Timeline() {
             </Card>
           ) : (
             <Box>
-              {/* Results Header */}
-              <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
-                <Typography variant="h6">
-                  Timeline Results ({timelineData.length} items)
-                </Typography>
-                <Typography variant="body2" color="text.secondary">
-                  Page {page} of {totalPages}
-                </Typography>
-              </Box>
 
               {/* Timeline Items */}
               <List sx={{ width: '100%' }}>
