@@ -310,61 +310,143 @@ Meteor.methods({
         return { success: false, error: 'Invalid JSON format' };
       }
 
-      // Create or get existing importer
+      // FIXED: Create or get existing importer with proper initialization
       let importer = activeImporters.get(jobId);
       if (!importer) {
         importer = new FacebookImporter(this.userId, jobId);
         activeImporters.set(jobId, importer);
+        
+        // Create patient record first if this is the first file
+        await importer.createPatientRecord();
       }
       
       // Determine data type based on file path
       const fileName = filePath.toLowerCase();
       
       try {
+        console.log(`📁 Processing file: ${filePath} (${fileName})`);
+        
         if (fileName.includes('post')) {
+          console.log(`📝 Found posts file with ${Array.isArray(jsonData) ? jsonData.length : 'unknown'} items`);
+          
+          // FIXED: Handle different post file structures
+          let posts = [];
           if (Array.isArray(jsonData)) {
-            await importer.processPosts(jsonData);
+            posts = jsonData;
+          } else if (jsonData.status_updates) {
+            posts = jsonData.status_updates;
+          } else if (jsonData.timeline) {
+            posts = jsonData.timeline;
+          } else if (jsonData.posts) {
+            posts = jsonData.posts;
           } else {
-            await importer.processPosts([jsonData]);
+            // Treat the whole object as a single post
+            posts = [jsonData];
           }
+          
+          if (posts.length > 0) {
+            await importer.processPosts(posts);
+            console.log(`✅ Processed ${posts.length} posts from ${filePath}`);
+          }
+          
         } else if (fileName.includes('friend')) {
-          const friends = jsonData.friends || jsonData;
-          if (Array.isArray(friends)) {
+          console.log(`👥 Found friends file`);
+          
+          let friends = [];
+          if (jsonData.friends) {
+            friends = jsonData.friends;
+          } else if (Array.isArray(jsonData)) {
+            friends = jsonData;
+          }
+          
+          if (friends.length > 0) {
             await importer.processFriends(friends);
+            console.log(`✅ Processed ${friends.length} friends from ${filePath}`);
           }
+          
         } else if (fileName.includes('photo')) {
-          const photos = jsonData.photos || jsonData;
-          if (Array.isArray(photos)) {
+          console.log(`📸 Found photos file`);
+          
+          let photos = [];
+          if (jsonData.photos) {
+            photos = jsonData.photos;
+          } else if (Array.isArray(jsonData)) {
+            photos = jsonData;
+          }
+          
+          if (photos.length > 0) {
             await importer.processPhotos(photos);
+            console.log(`✅ Processed ${photos.length} photos from ${filePath}`);
           }
+          
         } else if (fileName.includes('message')) {
-          const messages = jsonData.messages || jsonData;
-          if (Array.isArray(messages)) {
-            await importer.processMessages(messages);
+          console.log(`💬 Found messages file`);
+          
+          let messages = [];
+          if (jsonData.messages) {
+            messages = jsonData.messages;
+          } else if (Array.isArray(jsonData)) {
+            messages = jsonData;
           }
+          
+          if (messages.length > 0) {
+            await importer.processMessages(messages);
+            console.log(`✅ Processed ${messages.length} messages from ${filePath}`);
+          }
+        } else {
+          console.log(`⏩ Skipping file: ${filePath} (not a recognized type)`);
         }
 
-        // Update job progress
+        // FIXED: Update job progress properly
+        const currentProcessed = (job.processedRecords || 0) + 1;
+        const totalFiles = job.totalRecords || job.selectedFiles?.length || 1;
+        const progressPercent = Math.floor((currentProcessed / totalFiles) * 100);
+        
         await ImportJobs.updateAsync(
           { _id: jobId },
           { 
-            $inc: { processedRecords: 1 },
             $set: { 
+              processedRecords: currentProcessed,
+              progress: Math.min(progressPercent, 95), // Cap at 95% until complete
               status: 'processing',
-              updatedAt: new Date()
+              updatedAt: new Date(),
+              results: importer.stats // Update with current stats
             }
           }
         );
 
-        return { success: true };
+        // FIXED: Check if this was the last file to complete the job
+        if (currentProcessed >= totalFiles) {
+          console.log(`🎉 All files processed! Completing job ${jobId}`);
+          
+          await ImportJobs.updateAsync(
+            { _id: jobId },
+            { 
+              $set: {
+                status: 'completed',
+                progress: 100,
+                completedAt: new Date(),
+                updatedAt: new Date(),
+                results: importer.stats
+              }
+            }
+          );
+          
+          // Remove from active importers
+          activeImporters.delete(jobId);
+          
+          console.log(`✅ Job ${jobId} completed with results:`, importer.stats);
+        }
+
+        return { success: true, stats: importer.stats };
 
       } catch (processingError) {
-        console.error('File processing error:', processingError);
+        console.error('❌ File processing error:', processingError);
         throw processingError;
       }
 
     } catch (error) {
-      console.error('Process file content error:', error);
+      console.error('❌ Process file content error:', error);
       
       // Log error to job
       await ImportJobs.updateAsync(

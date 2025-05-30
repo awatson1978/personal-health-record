@@ -42,7 +42,9 @@ export const EXCLUDED_FILES = [
   'your_settings_for_groups_tab.json',
   'your_group_shortcuts.json',
   'your_group_warnings.json',
-  'your_contributions.json'
+  'your_contributions.json',
+  'photo_effects.json',
+  'media_used_for_memories.json'
 ];
 
 // Helper function to check if a file should be excluded
