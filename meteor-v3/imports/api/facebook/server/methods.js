@@ -316,7 +316,8 @@ Meteor.methods({
         importer = new FacebookImporter(this.userId, jobId);
         activeImporters.set(jobId, importer);
         
-        // Create patient record first if this is the first file
+        // FIXED: Always ensure patient record exists before processing any files
+        console.log('👤 Ensuring patient record exists for new importer...');
         await importer.createPatientRecord();
       }
       
@@ -329,7 +330,7 @@ Meteor.methods({
         if (fileName.includes('post')) {
           console.log(`📝 Found posts file with ${Array.isArray(jsonData) ? jsonData.length : 'unknown'} items`);
           
-          // FIXED: Handle different post file structures
+          // Handle different post file structures
           let posts = [];
           if (Array.isArray(jsonData)) {
             posts = jsonData;
@@ -355,6 +356,8 @@ Meteor.methods({
           let friends = [];
           if (jsonData.friends) {
             friends = jsonData.friends;
+          } else if (jsonData.friends_v2) {
+            friends = jsonData.friends_v2;
           } else if (Array.isArray(jsonData)) {
             friends = jsonData;
           }
@@ -393,11 +396,18 @@ Meteor.methods({
             await importer.processMessages(messages);
             console.log(`✅ Processed ${messages.length} messages from ${filePath}`);
           }
+          
+        } else if (fileName.includes('profile_information.json')) {
+          // FIXED: Handle profile information files for patient record enhancement
+          console.log(`👤 Found profile information file`);
+          await importer.processProfileInformation(jsonData);
+          console.log(`✅ Processed profile information from ${filePath}`);
+          
         } else {
           console.log(`⏩ Skipping file: ${filePath} (not a recognized type)`);
         }
 
-        // FIXED: Update job progress properly
+        // Update job progress properly
         const currentProcessed = (job.processedRecords || 0) + 1;
         const totalFiles = job.totalRecords || job.selectedFiles?.length || 1;
         const progressPercent = Math.floor((currentProcessed / totalFiles) * 100);
@@ -415,7 +425,7 @@ Meteor.methods({
           }
         );
 
-        // FIXED: Check if this was the last file to complete the job
+        // Check if this was the last file to complete the job
         if (currentProcessed >= totalFiles) {
           console.log(`🎉 All files processed! Completing job ${jobId}`);
           
@@ -468,26 +478,26 @@ Meteor.methods({
   },
 
   async 'facebook.processFromPath'(filePath, selectedFiles = []) {
-    check(filePath, String);
-    check(selectedFiles, [String]);
-    
-    if (!this.userId) {
-      throw new Meteor.Error('not-authorized', 'Must be logged in to process files');
-    }
+      check(filePath, String);
+      check(selectedFiles, [String]);
+      
+      if (!this.userId) {
+        throw new Meteor.Error('not-authorized', 'Must be logged in to process files');
+      }
 
-    try {
-      // Create import job
-      const jobId = await ImportJobs.insertAsync({
-        userId: this.userId,
-        filename: path.basename(filePath),
-        filePath: filePath,
-        selectedFiles: selectedFiles,
-        status: 'pending',
-        createdAt: new Date()
-      });
+      try {
+        // Create import job
+        const jobId = await ImportJobs.insertAsync({
+          userId: this.userId,
+          filename: path.basename(filePath),
+          filePath: filePath,
+          selectedFiles: selectedFiles,
+          status: 'pending',
+          createdAt: new Date()
+        });
 
-      // Process file/directory asynchronously
-      setImmediate(async function() {
+        // Process file/directory asynchronously
+        setImmediate(async function() {
         try {
           const scanner = new DirectoryScanner();
           

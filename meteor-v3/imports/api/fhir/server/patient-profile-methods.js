@@ -278,13 +278,13 @@ Meteor.methods({
     }
   },
 
-  async 'fhir.getPatientSummary'() {
+  async 'fhir.getPatientOverview'() {
     if (!this.userId) {
       throw new Meteor.Error('not-authorized', 'Must be logged in');
     }
 
     try {
-      console.log(`📊 Getting patient summary for user ${this.userId}`);
+      console.log(`📊 Getting patient overview for user ${this.userId}`);
       
       const patient = await Patients.findOneAsync({ userId: this.userId });
       
@@ -315,7 +315,7 @@ Meteor.methods({
         }
       });
 
-      const summary = {
+      const overview = {
         hasPatient: true,
         patientId: patient._id,
         name: get(patient, 'name.0.text', 'Unknown'),
@@ -330,12 +330,12 @@ Meteor.methods({
         source: get(patient, 'meta.source')
       };
 
-      console.log(`✅ Patient summary generated for user ${this.userId}:`, summary);
-      return summary;
+      console.log(`✅ Patient overview generated for user ${this.userId}:`, overview);
+      return overview;
 
     } catch (error) {
-      console.error('❌ Error getting patient summary:', error);
-      throw new Meteor.Error('summary-failed', error.message);
+      console.error('❌ Error getting patient overview:', error);
+      throw new Meteor.Error('overview-failed', error.message);
     }
   }
 });

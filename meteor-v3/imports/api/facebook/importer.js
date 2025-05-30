@@ -46,6 +46,68 @@ export class FacebookImporter {
     this.shouldStop = false;
   }
 
+
+  async createPatientRecord() {
+    console.log(`👤 Creating/updating patient record for user ${this.userId}...`);
+    
+    try {
+      const user = await Meteor.users.findOneAsync({ _id: this.userId });
+      if (!user) {
+        throw new Error('User not found');
+      }
+
+      // Check if patient already exists
+      const existingPatient = await Patients.findOneAsync({ userId: this.userId });
+      
+      const patient = {
+        resourceType: 'Patient',
+        id: this.userId, // Use userId as the FHIR resource ID
+        identifier: [{
+          use: 'usual',
+          system: 'https://facebook-fhir-timeline.com/patient-id',
+          value: this.userId
+        }],
+        active: true,
+        name: [{
+          use: 'usual',
+          text: get(user, 'profile.name', get(user, 'emails.0.address', 'Unknown User'))
+        }],
+        telecom: [{
+          system: 'email',
+          value: get(user, 'emails.0.address'),
+          use: 'home'
+        }],
+        meta: {
+          source: 'Facebook FHIR Timeline',
+          versionId: '1',
+          lastUpdated: new Date().toISOString()
+        }
+      };
+
+      let patientId;
+      
+      if (existingPatient) {
+        // Update existing patient
+        await Patients.updateWithUser(this.userId, { _id: existingPatient._id }, { $set: patient });
+        patientId = existingPatient._id;
+        console.log('✅ Updated existing patient record:', patientId);
+      } else {
+        // Create new patient
+        patientId = await Patients.insertWithUser(this.userId, patient);
+        this.stats.patients++;
+        console.log('✅ Created new patient record:', patientId);
+      }
+      
+      this.incrementProcessedRecords();
+      return patientId;
+      
+    } catch (error) {
+      console.error('❌ Error creating/updating patient record:', error);
+      await this.logError(error, { context: 'createPatientRecord', userId: this.userId });
+      throw error;
+    }
+  }
+
   async processData(facebookData) {
     try {
       console.log(`🚀 Starting Facebook import for user ${this.userId}, job ${this.jobId}`);
@@ -61,18 +123,18 @@ export class FacebookImporter {
       
       await this.updateJobProgress('counting', 5);
       
-      // Create or update patient record from experiences
+      // FIXED: ALWAYS create patient record first, regardless of data
       this.counters.currentPhase = 'patient';
-      console.log('👤 Creating patient record from experiences...');
-      await this.createPatientFromExperiences(facebookData);
+      console.log('👤 Creating patient record...');
+      await this.createPatientRecord();
       await this.updateJobProgress('patient', 10);
       
       // Process different data types with better structure detection
       const processedSomething = await this.processAllDataTypes(facebookData);
       
       if (!processedSomething) {
-        console.log('⚠️ No recognizable Facebook data structures found');
-        // Create some test data to verify the system works
+        console.log('⚠️ No recognizable Facebook data structures found, but patient record was created');
+        // Still create some test data to verify the system works
         await this.createTestData();
       }
       
@@ -91,6 +153,174 @@ export class FacebookImporter {
       throw error;
     }
   }
+
+  async processProfileInformation(profileData) {
+    console.log('👤 Processing profile information for patient record enhancement...');
+    
+    try {
+      // Find existing patient record
+      const existingPatient = await Patients.findOneAsync({ userId: this.userId });
+      if (!existingPatient) {
+        console.warn('⚠️ No patient record found to enhance with profile data');
+        return;
+      }
+
+      // Extract profile information from Facebook data
+      const profileEnhancements = {};
+      
+      // Handle basic profile information
+      if (profileData.profile_v2) {
+        const profile = profileData.profile_v2;
+        
+        // Update name if available
+        if (profile.name && profile.name.full_name) {
+          profileEnhancements.name = [{
+            use: 'usual',
+            text: profile.name.full_name,
+            given: profile.name.first_name ? [profile.name.first_name] : undefined,
+            family: profile.name.last_name || undefined
+          }];
+        }
+        
+        // Add birthday if available
+        if (profile.birthday) {
+          profileEnhancements.birthDate = profile.birthday;
+        }
+        
+        // Add gender if available
+        if (profile.gender) {
+          profileEnhancements.gender = profile.gender.toLowerCase();
+        }
+        
+        // Add profile picture if available
+        if (profile.profile_picture) {
+          profileEnhancements.photo = [{
+            contentType: 'image/jpeg',
+            url: profile.profile_picture,
+            title: 'Profile Picture'
+          }];
+        }
+      }
+
+      // Handle direct profile fields (newer format)
+      if (profileData.name) {
+        profileEnhancements.name = [{
+          use: 'usual',
+          text: profileData.name
+        }];
+      }
+      
+      if (profileData.birthday) {
+        profileEnhancements.birthDate = profileData.birthday;
+      }
+      
+      if (profileData.gender) {
+        profileEnhancements.gender = profileData.gender.toLowerCase();
+      }
+
+      // Handle emails
+      if (profileData.emails) {
+        profileEnhancements.telecom = profileData.emails.map(function(email) {
+          return {
+            system: 'email',
+            value: email,
+            use: 'home'
+          };
+        });
+      }
+
+      // Handle phone numbers
+      if (profileData.phone_numbers) {
+        if (!profileEnhancements.telecom) profileEnhancements.telecom = [];
+        profileData.phone_numbers.forEach(function(phone) {
+          profileEnhancements.telecom.push({
+            system: 'phone',
+            value: phone,
+            use: 'mobile'
+          });
+        });
+      }
+
+      // Handle addresses/locations
+      if (profileData.current_city || profileData.hometown) {
+        profileEnhancements.address = [];
+        
+        if (profileData.current_city) {
+          profileEnhancements.address.push({
+            use: 'home',
+            type: 'physical',
+            text: profileData.current_city,
+            city: profileData.current_city
+          });
+        }
+        
+        if (profileData.hometown && profileData.hometown !== profileData.current_city) {
+          profileEnhancements.address.push({
+            use: 'old',
+            type: 'physical', 
+            text: profileData.hometown,
+            city: profileData.hometown
+          });
+        }
+      }
+
+      // Handle relationship status
+      if (profileData.relationship_status) {
+        profileEnhancements.maritalStatus = {
+          text: profileData.relationship_status
+        };
+      }
+
+      // Handle work/education as extensions
+      const extensions = [];
+      
+      if (profileData.work) {
+        extensions.push({
+          url: 'http://hl7.org/fhir/StructureDefinition/patient-occupation',
+          valueString: Array.isArray(profileData.work) ? JSON.stringify(profileData.work) : profileData.work
+        });
+      }
+      
+      if (profileData.education) {
+        extensions.push({
+          url: 'http://hl7.org/fhir/StructureDefinition/patient-education',
+          valueString: Array.isArray(profileData.education) ? JSON.stringify(profileData.education) : profileData.education
+        });
+      }
+
+      if (extensions.length > 0) {
+        profileEnhancements.extension = extensions;
+      }
+
+      // Only update if we have enhancements
+      if (Object.keys(profileEnhancements).length > 0) {
+        // Merge with existing patient data
+        const updatedPatient = {
+          ...existingPatient,
+          ...profileEnhancements,
+          meta: {
+            ...get(existingPatient, 'meta', {}),
+            lastUpdated: new Date().toISOString(),
+            source: 'Facebook FHIR Timeline - Enhanced with Profile Data'
+          }
+        };
+
+        await Patients.updateWithUser(this.userId, { _id: existingPatient._id }, { $set: updatedPatient });
+        
+        console.log('✅ Enhanced patient record with profile information:', Object.keys(profileEnhancements));
+      } else {
+        console.log('ℹ️ No profile enhancements found in data');
+      }
+      
+      this.incrementProcessedRecords();
+      
+    } catch (error) {
+      console.error('❌ Error processing profile information:', error);
+      await this.logError(error, { context: 'processProfileInformation', profileData });
+      // Don't throw - this shouldn't stop the import
+    }
+  }
+
 
   async processAllDataTypes(facebookData) {
     let processedSomething = false;
@@ -276,109 +506,12 @@ export class FacebookImporter {
     return total;
   }
 
-  async createPatientFromExperiences(facebookData) {
-    const user = await Meteor.users.findOneAsync({ _id: this.userId });
-    if (!user) {
-      throw new Error('User not found');
-    }
 
-    // Check if patient already exists
-    const existingPatient = await Patients.findOneAsync({ userId: this.userId });
-    
-    const experiencesData = this.extractExperiencesData(facebookData);
-    
-    const patient = {
-      resourceType: 'Patient',
-      id: uuidv4(),
-      identifier: [{
-        use: 'usual',
-        system: 'https://facebook-fhir-timeline.com/patient-id',
-        value: user._id
-      }],
-      active: true,
-      name: [{
-        use: 'usual',
-        text: get(user, 'profile.name', get(user, 'emails.0.address', 'Unknown'))
-      }],
-      telecom: [{
-        system: 'email',
-        value: get(user, 'emails.0.address'),
-        use: 'home'
-      }]
-    };
-
-    // Enhance patient record with experiences data if available
-    if (experiencesData && Object.keys(experiencesData).length > 0) {
-      console.log('🔍 Enhancing patient record with experiences data:', Object.keys(experiencesData));
-      
-      // Add work experience
-      if (experiencesData.work) {
-        patient.extension = patient.extension || [];
-        patient.extension.push({
-          url: 'http://hl7.org/fhir/StructureDefinition/patient-occupation',
-          valueString: JSON.stringify(experiencesData.work)
-        });
-      }
-
-      // Add education experience
-      if (experiencesData.education) {
-        patient.extension = patient.extension || [];
-        patient.extension.push({
-          url: 'http://hl7.org/fhir/StructureDefinition/patient-education',
-          valueString: JSON.stringify(experiencesData.education)
-        });
-      }
-
-      // Add places lived
-      if (experiencesData.places_lived) {
-        patient.address = experiencesData.places_lived.map(function(place) {
-          return {
-            use: 'home',
-            text: get(place, 'name', 'Unknown location'),
-            period: {
-              start: place.start_timestamp ? moment.unix(place.start_timestamp).toDate() : undefined,
-              end: place.end_timestamp ? moment.unix(place.end_timestamp).toDate() : undefined
-            }
-          };
-        });
-      }
-
-      // Add relationship status if available
-      if (experiencesData.relationship) {
-        patient.maritalStatus = {
-          text: get(experiencesData.relationship, 'status', 'Unknown')
-        };
-      }
-    }
-
-    try {
-      let patientId;
-      
-      if (existingPatient) {
-        // Update existing patient with experiences data
-        await Patients.updateWithUser(this.userId, { _id: existingPatient._id }, { $set: patient });
-        patientId = existingPatient._id;
-        console.log('✅ Updated existing patient record with experiences:', patientId);
-      } else {
-        // Create new patient
-        patientId = await Patients.insertWithUser(this.userId, patient);
-        this.stats.patients++;
-        console.log('✅ Created new patient record with experiences:', patientId);
-      }
-      
-      this.incrementProcessedRecords();
-      return patientId;
-    } catch (error) {
-      console.error('❌ Error creating/updating patient with experiences:', error);
-      await this.logError(error, { context: 'createPatientFromExperiences', experiencesData });
-      throw error;
-    }
-  }
 
   async processExperiences(experiencesData) {
     console.log('🔍 Processing experiences data for patient enhancement...');
     
-    // The experiences data has already been processed in createPatientFromExperiences
+    // The experiences data has already been processed in createPatientRecord
     // This method is called for tracking purposes
     this.incrementProcessedRecords();
     console.log('✅ Experiences data processed for patient record enhancement');

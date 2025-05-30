@@ -51,7 +51,9 @@ export const EXCLUDED_FILES = [
   'received_friend_requests.json',
   'rejected_friend-requests.json',
   'your_pending_posts_in_groups.json',
-  'your_post_audiences.json'
+  'your_post_audiences.json',
+  'rejected_friend_requests.json',
+  'removed_friends.json'
 ];
 
 // Helper function to check if a file should be excluded

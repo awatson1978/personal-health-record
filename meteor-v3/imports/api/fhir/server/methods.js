@@ -466,5 +466,73 @@ Meteor.methods({
       valid: errors.length === 0,
       errors
     };
+  },
+  
+  async 'fhir.createPatientRecord'() {
+    if (!this.userId) {
+      throw new Meteor.Error('not-authorized', 'Must be logged in');
+    }
+
+    try {
+      console.log(`👤 Creating patient record for user ${this.userId}...`);
+      
+      // Check if patient already exists
+      const existingPatient = await Patients.findOneAsync({ userId: this.userId });
+      if (existingPatient) {
+        console.log('ℹ️ Patient record already exists:', existingPatient._id);
+        return {
+          success: true,
+          message: 'Patient record already exists',
+          patientId: existingPatient._id,
+          created: false
+        };
+      }
+      
+      const user = await Meteor.users.findOneAsync({ _id: this.userId });
+      if (!user) {
+        throw new Error('User not found');
+      }
+
+      const patient = {
+        resourceType: 'Patient',
+        id: this.userId,
+        identifier: [{
+          use: 'usual',
+          system: 'https://facebook-fhir-timeline.com/patient-id',
+          value: this.userId
+        }],
+        active: true,
+        name: [{
+          use: 'usual',
+          text: get(user, 'profile.name', get(user, 'emails.0.address', 'Unknown User'))
+        }],
+        telecom: [{
+          system: 'email',
+          value: get(user, 'emails.0.address'),
+          use: 'home'
+        }],
+        meta: {
+          source: 'Facebook FHIR Timeline',
+          versionId: '1',
+          lastUpdated: new Date().toISOString()
+        }
+      };
+
+      const patientId = await Patients.insertWithUser(this.userId, patient);
+      
+      console.log('✅ Created patient record:', patientId);
+      
+      return {
+        success: true,
+        message: 'Patient record created successfully',
+        patientId: patientId,
+        created: true
+      };
+      
+    } catch (error) {
+      console.error('❌ Error creating patient record:', error);
+      throw new Meteor.Error('patient-creation-failed', error.message);
+    }
   }
+
 });

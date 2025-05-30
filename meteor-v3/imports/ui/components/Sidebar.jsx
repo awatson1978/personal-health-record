@@ -24,9 +24,9 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { get } from 'lodash';
 
 const menuItems = [
+  { text: 'Import Data', icon: <UploadIcon />, path: '/import' },
   { text: 'Dashboard', icon: <DashboardIcon />, path: '/' },
   { text: 'Timeline', icon: <TimelineIcon />, path: '/timeline' },
-  { text: 'Import Data', icon: <UploadIcon />, path: '/import' },
   { text: 'Export Preview', icon: <ExportIcon />, path: '/export-preview' }
 ];
 

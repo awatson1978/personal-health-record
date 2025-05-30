@@ -991,7 +991,7 @@ function Import() {
                                   disabled={scanning}
                                   startIcon={scanning ? <CircularProgress size={20} /> : <FolderIcon />}
                                 >
-                                  {scanning ? 'Scanning...' : 'Scan Path'}
+                                  {scanning ? 'Scanning...' : 'Scan'}
                                 </Button>
                               </Box>
 
@@ -1029,7 +1029,7 @@ function Import() {
                                   disabled={scanning}
                                   startIcon={scanning ? <CircularProgress size={20} /> : <FileIcon />}
                                 >
-                                  {scanning ? 'Scanning...' : 'Choose ZIP File'}
+                                  {scanning ? 'Scanning...' : 'Choose .zip'}
                                 </Button>
                               </Box>
 
