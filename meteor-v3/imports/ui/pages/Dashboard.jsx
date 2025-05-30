@@ -315,7 +315,7 @@ function Dashboard() {
             </Card>
           ) : (
             <StatCard
-              title="Contacts"
+              title="Persons"
               value={get(stats, 'totalPersons', 0)}
               icon={<PersonIcon />}
               color="success"
@@ -364,7 +364,7 @@ function Dashboard() {
                 <Alert severity="info" sx={{ mb: 2 }}>
                   <Typography variant="body2">
                     <strong>FHIR Mapping:</strong> Posts → Clinical Records, Messages → Communications, 
-                    Photos → Media, Friends → Contacts
+                    Photos → Media, Friends → Persons
                   </Typography>
                 </Alert>
                 
@@ -442,7 +442,7 @@ function Dashboard() {
                 </Typography>
                 <Typography variant="body2" color="text.secondary" paragraph>
                   <strong>FHIR Mappings:</strong> Posts → Clinical Records, Messages → Communications, 
-                  Photos → Media, Friends → Contacts
+                  Photos → Media, Friends → Persons
                 </Typography>
                 <Button
                   variant="contained"

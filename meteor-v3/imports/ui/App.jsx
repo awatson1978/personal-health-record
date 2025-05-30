@@ -19,7 +19,6 @@ import { ErrorBoundary } from './components/ErrorBoundary';
 import Dashboard from './pages/Dashboard';
 import { Timeline } from './pages/Timeline';
 import Import from './pages/Import';
-import { Analytics } from './pages/Analytics';
 import { Settings } from './pages/Settings';
 import { Login } from './pages/Login';
 import { Register } from './pages/Register';
@@ -218,7 +217,6 @@ function App() {
                       <Route path="/" element={<Dashboard />} />
                       <Route path="/timeline" element={<Timeline />} />
                       <Route path="/import" element={<Import />} />
-                      <Route path="/analytics" element={<Analytics />} />
                       <Route path="/settings" element={<Settings />} />
                       <Route path="/export-preview" element={<ExportPreview />} />
                       <Route path="*" element={<Navigate to="/" replace />} />

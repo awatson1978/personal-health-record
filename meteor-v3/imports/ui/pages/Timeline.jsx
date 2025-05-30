@@ -35,7 +35,8 @@ import {
   ListItemSecondaryAction,
   FormControlLabel,
   Switch,
-  Snackbar
+  Snackbar,
+  CircularProgress
 } from '@mui/material';
 
 import {
@@ -77,6 +78,9 @@ export function Timeline() {
   const [itemsPerPage, setItemsPerPage] = useState(25);
   const [expandByDefault, setExpandByDefault] = useState(false);
   const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'success' });
+  
+  // FIXED: Track individual item deletion states to prevent flicker
+  const [deletingItems, setDeletingItems] = useState(new Set());
   
   // Filter state
   const [filters, setFilters] = useState({
@@ -320,8 +324,16 @@ export function Timeline() {
     });
   };
 
-  // Handle delete item
+  // FIXED: Handle delete item with proper loading state
   const handleDeleteItem = async function(item) {
+    const itemId = item._id;
+    
+    // Add to deleting set to show loading state
+    setDeletingItems(function(prev) {
+      const newSet = new Set(prev);
+      newSet.add(itemId);
+      return newSet;
+    });
 
     try {
       let methodName = '';
@@ -356,8 +368,15 @@ export function Timeline() {
         severity: 'success'
       });
       
-      // Reload current page data
-      loadTimelineData(page);
+      // Remove item from current data immediately for better UX
+      setTimelineData(function(prevData) {
+        return prevData.filter(function(dataItem) { 
+          return dataItem._id !== itemId; 
+        });
+      });
+      
+      // Update total count
+      setTotalCount(function(prevCount) { return prevCount - 1; });
       
     } catch (error) {
       console.error('Delete error:', error);
@@ -365,6 +384,13 @@ export function Timeline() {
         open: true,
         message: `Error deleting item: ${error.reason || error.message}`,
         severity: 'error'
+      });
+    } finally {
+      // Remove from deleting set
+      setDeletingItems(function(prev) {
+        const newSet = new Set(prev);
+        newSet.delete(itemId);
+        return newSet;
       });
     }
   };
@@ -374,11 +400,11 @@ export function Timeline() {
     setSnackbar({ ...snackbar, open: false });
   };
 
-  // Get resource type icon and color
+  // FIXED: Get resource type icon and color with proper labels
   const getResourceTypeInfo = function(resourceType) {
     switch (resourceType) {
       case 'ClinicalImpression':
-        return { icon: <HealthIcon />, color: 'error', label: 'Health Record' };
+        return { icon: <HealthIcon />, color: 'error', label: 'Clinical Impression' };
       case 'Communication':
         return { icon: <MessageIcon />, color: 'primary', label: 'Communication' };
       case 'Media':
@@ -399,6 +425,7 @@ export function Timeline() {
   // Render timeline item
   const renderTimelineItem = function(item, index) {
     const isExpanded = expandedItems.has(item._id);
+    const isDeleting = deletingItems.has(item._id);
     const resourceInfo = getResourceTypeInfo(item.resourceType);
     
     // Extract content based on resource type
@@ -409,7 +436,7 @@ export function Timeline() {
     switch (item.resourceType) {
       case 'ClinicalImpression':
         content = get(item, 'description', 'Clinical impression');
-        primaryText = `Health record from ${moment(item.date).format('MMM DD, YYYY')}`;
+        primaryText = `Clinical impression from ${moment(item.date).format('MMM DD, YYYY')}`;
         metadata = {
           status: item.status,
           findings: get(item, 'finding', []).length
@@ -444,7 +471,15 @@ export function Timeline() {
     const displayContent = needsExpansion && !isExpanded ? content.substring(0, 80) + '...' : content;
 
     return (
-      <Paper key={item._id} elevation={1} sx={{ mb: 2 }}>
+      <Paper 
+        key={item._id} 
+        elevation={1} 
+        sx={{ 
+          mb: 2,
+          opacity: isDeleting ? 0.5 : 1,
+          transition: 'opacity 0.3s ease'
+        }}
+      >
         <ListItem alignItems="flex-start" sx={{ flexDirection: 'column', alignItems: 'stretch' }}>
           {/* Header */}
           <Box display="flex" alignItems="center" width="100%" sx={{ mb: 1 }}>
@@ -472,6 +507,7 @@ export function Timeline() {
                 <IconButton 
                   edge="end" 
                   onClick={function() { toggleExpanded(item._id); }}
+                  disabled={isDeleting}
                 >
                   {isExpanded ? <ExpandLessIcon /> : <ExpandMoreIcon />}
                 </IconButton>
@@ -485,9 +521,9 @@ export function Timeline() {
               {/* Metadata */}
               <Box display="flex" flexWrap="wrap" gap={1} alignItems="center" justifyContent="space-between">
                 <Box display="flex" flexWrap="wrap" gap={1}>
-                  {/* FHIR ResourceType chip */}
+                  {/* FIXED: ResourceType chip without "FHIR:" prefix */}
                   <Chip
-                    label={`FHIR: ${item.resourceType}`}
+                    label={item.resourceType}
                     size="small"
                     color="primary"
                     variant="filled"
@@ -514,14 +550,19 @@ export function Timeline() {
                   />
                 </Box>
                 
-                {/* Delete button */}
+                {/* FIXED: Delete button with proper loading state */}
                 <IconButton
                   size="small"
                   onClick={function() { handleDeleteItem(item); }}
                   color="error"
                   aria-label="delete item"
+                  disabled={isDeleting}
                 >
-                  <DeleteIcon />
+                  {isDeleting ? (
+                    <CircularProgress size={20} color="error" />
+                  ) : (
+                    <DeleteIcon />
+                  )}
                 </IconButton>
               </Box>
             </Box>
@@ -614,7 +655,7 @@ export function Timeline() {
                 sx={{ mb: 2 }}
               />
 
-              {/* Resource Type Filter */}
+              {/* FIXED: Resource Type Filter with proper labels */}
               <FormControl fullWidth sx={{ mb: 2 }}>
                 <InputLabel>Resource Type</InputLabel>
                 <Select
@@ -623,7 +664,7 @@ export function Timeline() {
                   onChange={function(e) { handleFilterChange('resourceType', e.target.value); }}
                 >
                   <MenuItem value="all">All Types</MenuItem>
-                  <MenuItem value="clinical">Health Records</MenuItem>
+                  <MenuItem value="clinical">Clinical Impressions</MenuItem>
                   <MenuItem value="communication">Communications</MenuItem>
                   <MenuItem value="media">Media Files</MenuItem>
                   <MenuItem value="person">Contacts</MenuItem>
@@ -690,8 +731,6 @@ export function Timeline() {
                 </Select>
               </FormControl>
 
-
-
               {/* Sort Options */}
               <FormControl fullWidth sx={{ mb: 1 }}>
                 <InputLabel>Sort By</InputLabel>
@@ -745,7 +784,7 @@ export function Timeline() {
                     <strong>Current Page:</strong> {page} of {totalPages}
                   </Typography>
                   <Typography variant="body2" sx={{ mb: 1 }}>
-                    <strong>Health Records:</strong> {stats.clinicalImpressions}
+                    <strong>Clinical Impressions:</strong> {stats.clinicalImpressions}
                   </Typography>
                   <Typography variant="body2" sx={{ mb: 1 }}>
                     <strong>Communications:</strong> {stats.communications}

@@ -61,13 +61,13 @@ export class FacebookImporter {
       
       await this.updateJobProgress('counting', 5);
       
-      // Create or update patient record
+      // Create or update patient record from experiences
       this.counters.currentPhase = 'patient';
-      console.log('👤 Creating patient record...');
-      await this.createPatientRecord();
+      console.log('👤 Creating patient record from experiences...');
+      await this.createPatientFromExperiences(facebookData);
       await this.updateJobProgress('patient', 10);
       
-      // FIXED: Process different data types with better structure detection
+      // Process different data types with better structure detection
       const processedSomething = await this.processAllDataTypes(facebookData);
       
       if (!processedSomething) {
@@ -95,41 +95,51 @@ export class FacebookImporter {
   async processAllDataTypes(facebookData) {
     let processedSomething = false;
     
-    // FIXED: Handle posts/status updates/timeline
-    const postsData = this.extractPostsData(facebookData);
-    if (postsData.length > 0) {
-      this.counters.currentPhase = 'posts';
-      console.log(`📝 Processing ${postsData.length} posts...`);
-      await this.processPosts(postsData);
-      await this.updateJobProgress('posts', 40);
+    // Process experiences data for patient record
+    const experiencesData = this.extractExperiencesData(facebookData);
+    if (experiencesData && Object.keys(experiencesData).length > 0) {
+      this.counters.currentPhase = 'experiences';
+      console.log('🔍 Processing experiences data...');
+      await this.processExperiences(experiencesData);
+      await this.updateJobProgress('experiences', 15);
       processedSomething = true;
     }
-    
-    // FIXED: Handle friends data
+
+    // Process friends data to create Person records
     const friendsData = this.extractFriendsData(facebookData);
     if (friendsData.length > 0) {
       this.counters.currentPhase = 'friends';
-      console.log(`👥 Processing ${friendsData.length} friends...`);
+      console.log(`👥 Processing ${friendsData.length} friends as FHIR Persons...`);
       await this.processFriends(friendsData);
-      await this.updateJobProgress('friends', 60);
+      await this.updateJobProgress('friends', 30);
       processedSomething = true;
     }
     
-    // FIXED: Handle photos/media data  
+    // Handle posts/status updates/timeline as Clinical Impressions
+    const postsData = this.extractPostsData(facebookData);
+    if (postsData.length > 0) {
+      this.counters.currentPhase = 'posts';
+      console.log(`📝 Processing ${postsData.length} posts as Clinical Impressions...`);
+      await this.processPosts(postsData);
+      await this.updateJobProgress('posts', 50);
+      processedSomething = true;
+    }
+    
+    // Handle photos/media data  
     const mediaData = this.extractMediaData(facebookData);
     if (mediaData.length > 0) {
       this.counters.currentPhase = 'media';
       console.log(`📸 Processing ${mediaData.length} media items...`);
       await this.processPhotos(mediaData);
-      await this.updateJobProgress('media', 80);
+      await this.updateJobProgress('media', 70);
       processedSomething = true;
     }
     
-    // FIXED: Handle messages
+    // Handle messages as Communications
     const messagesData = this.extractMessagesData(facebookData);
     if (messagesData.length > 0) {
       this.counters.currentPhase = 'messages';
-      console.log(`💬 Processing ${messagesData.length} messages...`);
+      console.log(`💬 Processing ${messagesData.length} messages as Communications...`);
       await this.processMessages(messagesData);
       await this.updateJobProgress('messages', 90);
       processedSomething = true;
@@ -138,7 +148,22 @@ export class FacebookImporter {
     return processedSomething;
   }
 
-  // FIXED: Better data extraction methods
+  // Extract experiences data for patient record creation
+  extractExperiencesData(facebookData) {
+    if (facebookData.experiences && typeof facebookData.experiences === 'object') {
+      return facebookData.experiences;
+    }
+    
+    // Check for direct experiences data
+    if (facebookData.your_experiences) {
+      return facebookData.your_experiences;
+    }
+    
+    console.log('📝 No experiences data found for patient record enhancement');
+    return {};
+  }
+
+  // Better data extraction methods
   extractPostsData(facebookData) {
     let allPosts = [];
     
@@ -153,6 +178,10 @@ export class FacebookImporter {
     
     if (facebookData.timeline && isArray(facebookData.timeline)) {
       allPosts = allPosts.concat(facebookData.timeline);
+    }
+
+    if (facebookData.your_posts && isArray(facebookData.your_posts)) {
+      allPosts = allPosts.concat(facebookData.your_posts);
     }
     
     // Handle single post objects
@@ -170,10 +199,13 @@ export class FacebookImporter {
   extractFriendsData(facebookData) {
     let allFriends = [];
     
-    if (facebookData.friends && isArray(facebookData.friends)) {
-      allFriends = facebookData.friends;
-    } else if (facebookData.friends_v2 && isArray(facebookData.friends_v2)) {
+    // Handle your_friends.json structure
+    if (facebookData.friends_v2 && isArray(facebookData.friends_v2)) {
       allFriends = facebookData.friends_v2;
+    } else if (facebookData.friends && isArray(facebookData.friends)) {
+      allFriends = facebookData.friends;
+    } else if (facebookData.your_friends && isArray(facebookData.your_friends)) {
+      allFriends = facebookData.your_friends;
     } else if (isArray(facebookData) && facebookData.length > 0 && facebookData[0].name) {
       // This might be a friends array directly
       allFriends = facebookData;
@@ -193,6 +225,14 @@ export class FacebookImporter {
     if (facebookData.videos && isArray(facebookData.videos)) {
       allMedia = allMedia.concat(facebookData.videos);
     }
+
+    if (facebookData.your_photos && isArray(facebookData.your_photos)) {
+      allMedia = allMedia.concat(facebookData.your_photos);
+    }
+
+    if (facebookData.your_videos && isArray(facebookData.your_videos)) {
+      allMedia = allMedia.concat(facebookData.your_videos);
+    }
     
     // Handle uncategorized photos
     if (isArray(facebookData) && facebookData.length > 0 && facebookData[0].uri) {
@@ -209,6 +249,10 @@ export class FacebookImporter {
     if (facebookData.messages && isArray(facebookData.messages)) {
       allMessages = facebookData.messages;
     }
+
+    if (facebookData.your_messages && isArray(facebookData.your_messages)) {
+      allMessages = facebookData.your_messages;
+    }
     
     console.log(`💬 Extracted ${allMessages.length} messages from Facebook data`);
     return allMessages;
@@ -222,26 +266,27 @@ export class FacebookImporter {
     total += this.extractMediaData(facebookData).length;
     total += this.extractMessagesData(facebookData).length;
     
+    // Count experiences if present
+    const experiencesData = this.extractExperiencesData(facebookData);
+    if (experiencesData && Object.keys(experiencesData).length > 0) {
+      total += 1; // Count experiences processing
+    }
+    
     console.log(`📊 Counted ${total} total records to process`);
     return total;
   }
 
-  async createPatientRecord() {
+  async createPatientFromExperiences(facebookData) {
     const user = await Meteor.users.findOneAsync({ _id: this.userId });
     if (!user) {
       throw new Error('User not found');
     }
 
-    const existingPatient = await Patients.findOneAsync({ 
-      userId: this.userId
-    });
+    // Check if patient already exists
+    const existingPatient = await Patients.findOneAsync({ userId: this.userId });
     
-    if (existingPatient) {
-      console.log('👤 Patient record already exists, skipping creation');
-      this.incrementProcessedRecords();
-      return existingPatient._id;
-    }
-
+    const experiencesData = this.extractExperiencesData(facebookData);
+    
     const patient = {
       resourceType: 'Patient',
       id: uuidv4(),
@@ -262,233 +307,81 @@ export class FacebookImporter {
       }]
     };
 
+    // Enhance patient record with experiences data if available
+    if (experiencesData && Object.keys(experiencesData).length > 0) {
+      console.log('🔍 Enhancing patient record with experiences data:', Object.keys(experiencesData));
+      
+      // Add work experience
+      if (experiencesData.work) {
+        patient.extension = patient.extension || [];
+        patient.extension.push({
+          url: 'http://hl7.org/fhir/StructureDefinition/patient-occupation',
+          valueString: JSON.stringify(experiencesData.work)
+        });
+      }
+
+      // Add education experience
+      if (experiencesData.education) {
+        patient.extension = patient.extension || [];
+        patient.extension.push({
+          url: 'http://hl7.org/fhir/StructureDefinition/patient-education',
+          valueString: JSON.stringify(experiencesData.education)
+        });
+      }
+
+      // Add places lived
+      if (experiencesData.places_lived) {
+        patient.address = experiencesData.places_lived.map(function(place) {
+          return {
+            use: 'home',
+            text: get(place, 'name', 'Unknown location'),
+            period: {
+              start: place.start_timestamp ? moment.unix(place.start_timestamp).toDate() : undefined,
+              end: place.end_timestamp ? moment.unix(place.end_timestamp).toDate() : undefined
+            }
+          };
+        });
+      }
+
+      // Add relationship status if available
+      if (experiencesData.relationship) {
+        patient.maritalStatus = {
+          text: get(experiencesData.relationship, 'status', 'Unknown')
+        };
+      }
+    }
+
     try {
-      const patientId = await Patients.insertWithUser(this.userId, patient);
-      this.stats.patients++;
+      let patientId;
+      
+      if (existingPatient) {
+        // Update existing patient with experiences data
+        await Patients.updateWithUser(this.userId, { _id: existingPatient._id }, { $set: patient });
+        patientId = existingPatient._id;
+        console.log('✅ Updated existing patient record with experiences:', patientId);
+      } else {
+        // Create new patient
+        patientId = await Patients.insertWithUser(this.userId, patient);
+        this.stats.patients++;
+        console.log('✅ Created new patient record with experiences:', patientId);
+      }
+      
       this.incrementProcessedRecords();
-      console.log('✅ Created patient record:', patientId);
       return patientId;
     } catch (error) {
-      console.error('❌ Error creating patient:', error);
-      await this.logError(error, { context: 'createPatientRecord' });
+      console.error('❌ Error creating/updating patient with experiences:', error);
+      await this.logError(error, { context: 'createPatientFromExperiences', experiencesData });
       throw error;
     }
   }
 
-  async processPosts(posts) {
-    if (!isArray(posts) || posts.length === 0) {
-      console.log('📝 No posts to process');
-      return;
-    }
+  async processExperiences(experiencesData) {
+    console.log('🔍 Processing experiences data for patient enhancement...');
     
-    const totalPosts = posts.length;
-    let processed = 0;
-    let errors = 0;
-
-    console.log(`📝 Processing ${totalPosts} posts...`);
-
-    for (const post of posts) {
-      if (this.shouldStop) {
-        console.log('🛑 Processing stopped by user');
-        break;
-      }
-
-      try {
-        await this.processPost(post);
-        processed++;
-        this.incrementProcessedRecords();
-        
-        if (processed % 25 === 0 || processed === totalPosts) {
-          const currentProgress = 10 + Math.floor((processed / totalPosts) * 30);
-          await this.updateJobProgress('posts', currentProgress);
-          console.log(`📝 Processed ${processed}/${totalPosts} posts (${currentProgress}%)`);
-        }
-      } catch (error) {
-        errors++;
-        console.error(`❌ Error processing post ${processed + 1}:`, error);
-        await this.logError(error, { post: post, postIndex: processed });
-        this.incrementProcessedRecords();
-        
-        if (errors > totalPosts * 0.1) {
-          console.error(`🚨 Too many errors (${errors}), stopping post processing`);
-          break;
-        }
-      }
-    }
-    
-    console.log(`✅ Completed processing posts: ${processed} successful, ${errors} errors`);
-  }
-
-  async processPost(post) {
-    // FIXED: Handle different post structures
-    let content = '';
-    let timestamp = null;
-    let attachments = [];
-    
-    // Extract content from various structures
-    if (post.data && isArray(post.data) && post.data[0] && post.data[0].post) {
-      content = post.data[0].post;
-      timestamp = post.timestamp;
-      attachments = get(post, 'attachments', []);
-    } else if (post.post) {
-      content = post.post;
-      timestamp = post.timestamp;
-    } else if (post.message) {
-      content = post.message;
-      timestamp = post.timestamp;
-    } else if (post.text) {
-      content = post.text;
-      timestamp = post.created_time || post.timestamp;
-    }
-    
-    // Skip empty posts
-    if (!content && !attachments.length) {
-      console.log('⏩ Skipping empty post');
-      return;
-    }
-
-    const postDate = timestamp ? moment.unix(timestamp).toDate() : new Date();
-    
-    // FIXED: Create Communication resource with better structure
-    const communication = {
-      resourceType: 'Communication',
-      id: uuidv4(),
-      status: 'completed',
-      sent: postDate,
-      sender: {
-        reference: `Patient/${this.userId}`,
-        display: 'Self'
-      },
-      recipient: [{
-        reference: `Patient/${this.userId}`,
-        display: 'Personal Timeline'
-      }],
-      payload: []
-    };
-
-    if (content) {
-      communication.payload.push({
-        contentString: content
-      });
-    }
-
-    // Process attachments
-    for (const attachment of attachments) {
-      try {
-        const mediaData = get(attachment, 'data.0.media');
-        if (mediaData) {
-          const mediaResource = await this.createMediaResource(mediaData, postDate);
-          if (mediaResource) {
-            communication.payload.push({
-              contentAttachment: {
-                url: `Media/${mediaResource}`,
-                title: get(mediaData, 'title', 'Attached Media')
-              }
-            });
-          }
-        }
-      } catch (mediaError) {
-        console.error('⚠️ Error processing media attachment:', mediaError);
-      }
-    }
-
-    try {
-      const commId = await Communications.insertWithUser(this.userId, communication);
-      this.stats.communications++;
-      console.log(`✅ Created communication: ${commId}`);
-
-      // Check for clinical content
-      if (content && this.clinicalDetector.isClinicallRelevant(content)) {
-        try {
-          await this.createClinicalImpression(content, postDate, commId);
-          console.log(`🏥 Created clinical impression for: "${content.substring(0, 50)}..."`);
-        } catch (clinicalError) {
-          console.error('⚠️ Error creating clinical impression:', clinicalError);
-        }
-      }
-    } catch (error) {
-      console.error('❌ Error creating communication:', error);
-      throw error;
-    }
-  }
-
-  async createClinicalImpression(content, date, sourceCommId) {
-    try {
-      const findings = this.clinicalDetector.extractFindings(content);
-      
-      const clinicalImpression = {
-        resourceType: 'ClinicalImpression',
-        id: uuidv4(),
-        status: 'completed',
-        subject: {
-          reference: `Patient/${this.userId}`,
-          display: 'Self'
-        },
-        assessor: {
-          reference: `Patient/${this.userId}`,
-          display: 'Self-reported'
-        },
-        date: date,
-        description: `Patient reported: "${content}"`,
-        investigation: [{
-          code: {
-            text: 'Social Media Health Report'
-          },
-          item: [{
-            reference: `Communication/${sourceCommId}`,
-            display: 'Original social media post'
-          }]
-        }],
-        finding: findings.map(function(finding) {
-          return {
-            item: {
-              text: finding.term
-            },
-            cause: finding.confidence > 0.7 ? 'likely' : 'possible'
-          };
-        })
-      };
-
-      const impressionId = await ClinicalImpressions.insertWithUser(this.userId, clinicalImpression);
-      this.stats.clinicalImpressions++;
-      console.log(`✅ Created clinical impression: ${impressionId}`);
-      return impressionId;
-    } catch (error) {
-      console.error('❌ Error creating clinical impression:', error);
-      throw error;
-    }
-  }
-
-  async createMediaResource(mediaData, createdDate) {
-    try {
-      const media = {
-        resourceType: 'Media',
-        id: uuidv4(),
-        status: 'completed',
-        type: {
-          text: get(mediaData, 'media_type', 'unknown')
-        },
-        subject: {
-          reference: `Patient/${this.userId}`,
-          display: 'Self'
-        },
-        createdDateTime: createdDate,
-        content: {
-          contentType: this.getContentType(mediaData),
-          url: get(mediaData, 'uri', ''),
-          title: get(mediaData, 'title', ''),
-          size: get(mediaData, 'size', 0)
-        }
-      };
-
-      const mediaId = await Media.insertWithUser(this.userId, media);
-      this.stats.media++;
-      console.log(`✅ Created media resource: ${mediaId}`);
-      return mediaId;
-    } catch (error) {
-      console.error('❌ Error creating media resource:', error);
-      throw error;
-    }
+    // The experiences data has already been processed in createPatientFromExperiences
+    // This method is called for tracking purposes
+    this.incrementProcessedRecords();
+    console.log('✅ Experiences data processed for patient record enhancement');
   }
 
   async processFriends(friends) {
@@ -497,11 +390,16 @@ export class FacebookImporter {
       return;
     }
 
-    console.log(`👥 Processing ${friends.length} friends...`);
+    console.log(`👥 Processing ${friends.length} friends as FHIR Person records...`);
     const careTeamParticipants = [];
     let processed = 0;
 
     for (const friend of friends) {
+      if (this.shouldStop) {
+        console.log('🛑 Processing stopped by user');
+        break;
+      }
+
       try {
         const friendName = get(friend, 'name', '');
         if (!friendName) {
@@ -509,12 +407,13 @@ export class FacebookImporter {
           continue;
         }
 
-        // Create Person resource
+        // Create FHIR Person resource
         const person = {
           resourceType: 'Person',
           id: uuidv4(),
           active: true,
           name: [{
+            use: 'usual',
             text: friendName
           }],
           link: [{
@@ -525,13 +424,21 @@ export class FacebookImporter {
           }]
         };
 
+        // Add timestamp if available
+        if (friend.timestamp) {
+          person.extension = [{
+            url: 'http://facebook-fhir-timeline.com/friend-since',
+            valueDateTime: moment.unix(friend.timestamp).toDate()
+          }];
+        }
+
         const personId = await Persons.insertWithUser(this.userId, person);
         this.stats.persons++;
         processed++;
         this.incrementProcessedRecords();
-        console.log(`✅ Created person: ${personId} (${friendName})`);
+        console.log(`✅ Created FHIR Person: ${personId} (${friendName})`);
 
-        // Add to care team
+        // Add to care team participants
         careTeamParticipants.push({
           member: {
             reference: `Person/${personId}`,
@@ -576,7 +483,186 @@ export class FacebookImporter {
       }
     }
 
-    console.log(`✅ Completed processing ${processed} friends`);
+    console.log(`✅ Completed processing ${processed} friends as FHIR Person records`);
+  }
+
+  async processPosts(posts) {
+    if (!isArray(posts) || posts.length === 0) {
+      console.log('📝 No posts to process');
+      return;
+    }
+    
+    const totalPosts = posts.length;
+    let processed = 0;
+    let errors = 0;
+
+    console.log(`📝 Processing ${totalPosts} posts as Clinical Impressions...`);
+
+    for (const post of posts) {
+      if (this.shouldStop) {
+        console.log('🛑 Processing stopped by user');
+        break;
+      }
+
+      try {
+        await this.processPost(post);
+        processed++;
+        this.incrementProcessedRecords();
+        
+        if (processed % 25 === 0 || processed === totalPosts) {
+          const currentProgress = 30 + Math.floor((processed / totalPosts) * 20);
+          await this.updateJobProgress('posts', currentProgress);
+          console.log(`📝 Processed ${processed}/${totalPosts} posts as Clinical Impressions (${currentProgress}%)`);
+        }
+      } catch (error) {
+        errors++;
+        console.error(`❌ Error processing post ${processed + 1}:`, error);
+        await this.logError(error, { post: post, postIndex: processed });
+        this.incrementProcessedRecords();
+        
+        if (errors > totalPosts * 0.1) {
+          console.error(`🚨 Too many errors (${errors}), stopping post processing`);
+          break;
+        }
+      }
+    }
+    
+    console.log(`✅ Completed processing posts as Clinical Impressions: ${processed} successful, ${errors} errors`);
+  }
+
+  async processPost(post) {
+    // Handle different post structures
+    let content = '';
+    let timestamp = null;
+    let attachments = [];
+    
+    // Extract content from various structures
+    if (post.data && isArray(post.data) && post.data[0] && post.data[0].post) {
+      content = post.data[0].post;
+      timestamp = post.timestamp;
+      attachments = get(post, 'attachments', []);
+    } else if (post.post) {
+      content = post.post;
+      timestamp = post.timestamp;
+    } else if (post.message) {
+      content = post.message;
+      timestamp = post.timestamp;
+    } else if (post.text) {
+      content = post.text;
+      timestamp = post.created_time || post.timestamp;
+    }
+    
+    // Skip empty posts
+    if (!content && !attachments.length) {
+      console.log('⏩ Skipping empty post');
+      return;
+    }
+
+    const postDate = timestamp ? moment.unix(timestamp).toDate() : new Date();
+    
+    // Create Clinical Impression (not Communication) for posts
+    const clinicalImpression = {
+      resourceType: 'ClinicalImpression',
+      id: uuidv4(),
+      status: 'completed',
+      subject: {
+        reference: `Patient/${this.userId}`,
+        display: 'Self'
+      },
+      assessor: {
+        reference: `Patient/${this.userId}`,
+        display: 'Self-reported via social media'
+      },
+      date: postDate,
+      description: content || 'Social media post with attachments'
+    };
+
+    // Check for clinical content and add findings
+    if (content && this.clinicalDetector.isClinicallRelevant(content)) {
+      const findings = this.clinicalDetector.extractFindings(content);
+      
+      clinicalImpression.finding = findings.map(function(finding) {
+        return {
+          item: {
+            text: finding.display || finding.term,
+            coding: finding.code ? [{
+              system: finding.system,
+              code: finding.code,
+              display: finding.display
+            }] : undefined
+          },
+          basis: `Confidence: ${(finding.confidence * 100).toFixed(0)}%`
+        };
+      });
+    }
+
+    // Process attachments as investigations
+    if (attachments.length > 0) {
+      clinicalImpression.investigation = [{
+        code: {
+          text: 'Social Media Attachments'
+        },
+        item: []
+      }];
+
+      for (const attachment of attachments) {
+        try {
+          const mediaData = get(attachment, 'data.0.media');
+          if (mediaData) {
+            const mediaResource = await this.createMediaResource(mediaData, postDate);
+            if (mediaResource) {
+              clinicalImpression.investigation[0].item.push({
+                reference: `Media/${mediaResource}`,
+                display: get(mediaData, 'title', 'Attached Media')
+              });
+            }
+          }
+        } catch (mediaError) {
+          console.error('⚠️ Error processing media attachment:', mediaError);
+        }
+      }
+    }
+
+    try {
+      const impressionId = await ClinicalImpressions.insertWithUser(this.userId, clinicalImpression);
+      this.stats.clinicalImpressions++;
+      console.log(`✅ Created Clinical Impression from post: ${impressionId}`);
+    } catch (error) {
+      console.error('❌ Error creating clinical impression:', error);
+      throw error;
+    }
+  }
+
+  async createMediaResource(mediaData, createdDate) {
+    try {
+      const media = {
+        resourceType: 'Media',
+        id: uuidv4(),
+        status: 'completed',
+        type: {
+          text: get(mediaData, 'media_type', 'unknown')
+        },
+        subject: {
+          reference: `Patient/${this.userId}`,
+          display: 'Self'
+        },
+        createdDateTime: createdDate,
+        content: {
+          contentType: this.getContentType(mediaData),
+          url: get(mediaData, 'uri', ''),
+          title: get(mediaData, 'title', ''),
+          size: get(mediaData, 'size', 0)
+        }
+      };
+
+      const mediaId = await Media.insertWithUser(this.userId, media);
+      this.stats.media++;
+      console.log(`✅ Created media resource: ${mediaId}`);
+      return mediaId;
+    } catch (error) {
+      console.error('❌ Error creating media resource:', error);
+      throw error;
+    }
   }
 
   async processPhotos(mediaItems) {
@@ -590,7 +676,7 @@ export class FacebookImporter {
 
     for (const mediaItem of mediaItems) {
       try {
-        // FIXED: Handle different media structures
+        // Handle different media structures
         let createdDate = new Date();
         if (mediaItem.creation_timestamp) {
           createdDate = moment.unix(mediaItem.creation_timestamp).toDate();
@@ -621,17 +707,17 @@ export class FacebookImporter {
       return;
     }
 
-    console.log(`💬 Processing ${messages.length} messages...`);
+    console.log(`💬 Processing ${messages.length} messages as Communications...`);
     let processed = 0;
 
     for (const message of messages) {
       try {
-        // FIXED: Better message processing
+        // Better message processing
         const content = get(message, 'content', get(message, 'text', ''));
         if (content) {
           const messageDate = message.timestamp ? moment.unix(message.timestamp).toDate() : new Date();
           
-          // Create Communication for important messages
+          // Create Communication for messages
           const communication = {
             resourceType: 'Communication',
             id: uuidv4(),
@@ -645,7 +731,7 @@ export class FacebookImporter {
               contentString: content
             }],
             category: [{
-              text: 'Message'
+              text: 'Direct Message'
             }]
           };
           
@@ -653,7 +739,7 @@ export class FacebookImporter {
           this.stats.communications++;
           
           if (processed % 50 === 0) {
-            console.log(`💬 Processed ${processed}/${messages.length} messages`);
+            console.log(`💬 Processed ${processed}/${messages.length} messages as Communications`);
           }
         }
         
@@ -666,15 +752,15 @@ export class FacebookImporter {
       }
     }
     
-    console.log(`✅ Completed processing ${processed} messages`);
+    console.log(`✅ Completed processing ${processed} messages as Communications`);
   }
 
-  // FIXED: Create test data to verify system works
+  // Create test data to verify system works
   async createTestData() {
     console.log('🧪 Creating test data to verify system functionality...');
     
     try {
-      // Create test communication
+      // Create test Communication (from message)
       const testCommunication = {
         resourceType: 'Communication',
         id: uuidv4(),
@@ -684,26 +770,68 @@ export class FacebookImporter {
           reference: `Patient/${this.userId}`,
           display: 'Self'
         },
-        recipient: [{
-          reference: `Patient/${this.userId}`,
-          display: 'Test Timeline'
-        }],
         payload: [{
-          contentString: 'Test post: I had a great day at the doctor today! Feeling healthy and strong.'
+          contentString: 'Test message: Thanks for checking in! I\'m doing well today.'
+        }],
+        category: [{
+          text: 'Test Message'
         }]
       };
 
       const commId = await Communications.insertWithUser(this.userId, testCommunication);
       this.stats.communications++;
       this.incrementProcessedRecords();
-      console.log('✅ Created test communication');
+      console.log('✅ Created test communication (message)');
 
-      // Create test clinical impression
-      await this.createClinicalImpression(
-        'Test clinical content: Had a checkup today, doctor said everything looks good!',
-        new Date(),
-        commId
-      );
+      // Create test Clinical Impression (from post)
+      const testClinicalImpression = {
+        resourceType: 'ClinicalImpression',
+        id: uuidv4(),
+        status: 'completed',
+        subject: {
+          reference: `Patient/${this.userId}`,
+          display: 'Self'
+        },
+        assessor: {
+          reference: `Patient/${this.userId}`,
+          display: 'Self-reported via social media'
+        },
+        date: new Date(),
+        description: 'Test post: Had a great checkup today! Doctor said everything looks good. Feeling healthy and strong! 💪',
+        finding: [{
+          item: {
+            text: 'Positive health assessment'
+          },
+          basis: 'Patient reported via social media'
+        }]
+      };
+
+      const impressionId = await ClinicalImpressions.insertWithUser(this.userId, testClinicalImpression);
+      this.stats.clinicalImpressions++;
+      this.incrementProcessedRecords();
+      console.log('✅ Created test clinical impression (post)');
+
+      // Create test Person (from friend)
+      const testPerson = {
+        resourceType: 'Person',
+        id: uuidv4(),
+        active: true,
+        name: [{
+          use: 'usual',
+          text: 'Dr. Jane Smith'
+        }],
+        link: [{
+          target: {
+            reference: `Patient/${this.userId}`
+          },
+          assurance: 'level2'
+        }]
+      };
+
+      const personId = await Persons.insertWithUser(this.userId, testPerson);
+      this.stats.persons++;
+      this.incrementProcessedRecords();
+      console.log('✅ Created test person (friend)');
 
       // Create test media
       const testMedia = {

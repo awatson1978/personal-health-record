@@ -27,8 +27,7 @@ const menuItems = [
   { text: 'Dashboard', icon: <DashboardIcon />, path: '/' },
   { text: 'Timeline', icon: <TimelineIcon />, path: '/timeline' },
   { text: 'Import Data', icon: <UploadIcon />, path: '/import' },
-  { text: 'Export Preview', icon: <ExportIcon />, path: '/export-preview' },
-  { text: 'Analytics', icon: <AnalyticsIcon />, path: '/analytics' },
+  { text: 'Export Preview', icon: <ExportIcon />, path: '/export-preview' }
 ];
 
 const secondaryItems = [

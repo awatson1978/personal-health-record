@@ -45,7 +45,8 @@ import {
   Warning as WarningIcon,
   Code as CodeIcon,
   Refresh as RefreshIcon,
-  BugReport as DebugIcon
+  BugReport as DebugIcon,
+  Edit as EditIcon
 } from '@mui/icons-material';
 
 import AceEditor from 'react-ace';
@@ -93,9 +94,14 @@ export function ExportPreview() {
     includeMetadata: true,
     theme: 'github',
     fontSize: 14,
-    wordWrap: false, // Changed default to false
+    wordWrap: false,
     resourceTypes: ['all'],
-    displayRows: 1000 // New setting for number of rows to display
+    displayRows: 1000
+  });
+
+  // FIXED: Add filename state with default value based on current settings
+  const [filename, setFilename] = useState(function() {
+    return `fhir-export-${moment().format('YYYY-MM-DD-HHmm')}`;
   });
 
   // Load export preview data
@@ -183,7 +189,7 @@ export function ExportPreview() {
     }
   };
 
-  // Load data on mount and when settings change
+  // FIXED: Load data on mount and when relevant settings change
   useEffect(function() {
     if (Meteor.userId()) {
       console.log('🔍 DEBUG: Component mounted, user ID:', Meteor.userId());
@@ -192,6 +198,13 @@ export function ExportPreview() {
       console.log('🔍 DEBUG: No user ID, skipping load');
     }
   }, [Meteor.userId(), exportSettings.format, exportSettings.includeMetadata, exportSettings.resourceTypes]);
+
+  // FIXED: Update filename when format changes
+  useEffect(function() {
+    const baseFilename = `fhir-export-${moment().format('YYYY-MM-DD-HHmm')}`;
+    const extension = exportSettings.format === 'ndjson' ? '.ndjson' : '.json';
+    setFilename(baseFilename + extension);
+  }, [exportSettings.format]);
 
   // Handle export setting changes
   const handleSettingChange = function(key, value) {
@@ -239,8 +252,21 @@ export function ExportPreview() {
       
       // Format the data for download
       let downloadData = '';
-      let fileName = `fhir-export-${moment().format('YYYY-MM-DD-HHmm')}`;
+      let downloadFilename = filename;
       let mimeType = 'application/json';
+      
+      // Ensure filename has correct extension
+      if (exportSettings.format === 'ndjson') {
+        if (!downloadFilename.endsWith('.ndjson')) {
+          downloadFilename = downloadFilename.replace(/\.(json|ndjson)$/, '') + '.ndjson';
+        }
+        mimeType = 'application/x-ndjson';
+      } else {
+        if (!downloadFilename.endsWith('.json')) {
+          downloadFilename = downloadFilename.replace(/\.(json|ndjson)$/, '') + '.json';
+        }
+        mimeType = 'application/json';
+      }
       
       if (exportSettings.format === 'ndjson') {
         // Convert to NDJSON format - each resource on its own line
@@ -259,13 +285,9 @@ export function ExportPreview() {
         }
         
         downloadData = lines.join('\n');
-        fileName += '.ndjson';
-        mimeType = 'application/x-ndjson';
       } else {
         // Regular JSON format
         downloadData = JSON.stringify(downloadResult, null, exportSettings.prettyPrint ? 2 : 0);
-        fileName += '.json';
-        mimeType = 'application/json';
       }
       
       // Create and trigger download
@@ -273,13 +295,13 @@ export function ExportPreview() {
       const url = window.URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
-      link.download = fileName;
+      link.download = downloadFilename;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
       window.URL.revokeObjectURL(url);
       
-      console.log(`✅ Download completed: ${fileName}`);
+      console.log(`✅ Download completed: ${downloadFilename}`);
       
     } catch (error) {
       console.error('❌ Download error:', error);
@@ -289,7 +311,7 @@ export function ExportPreview() {
     }
   };
 
-  // Format the data for display (limited by displayRows setting)
+  // FIXED: Format the data for display with proper row limiting
   const getDisplayData = function() {
     if (!exportData) {
       return '// No export data available\n// Debug info below:\n' + 
@@ -301,19 +323,20 @@ export function ExportPreview() {
         // Convert to NDJSON format - each resource on its own line
         const lines = [];
         let resourceCount = 0;
+        const maxRows = exportSettings.displayRows === -1 ? Infinity : exportSettings.displayRows;
         
         if (exportData.bundle && exportData.bundle.entry) {
           for (const entry of exportData.bundle.entry) {
-            if (entry.resource && resourceCount < exportSettings.displayRows) {
+            if (entry.resource && resourceCount < maxRows) {
               lines.push(JSON.stringify(entry.resource, null, 0));
               resourceCount++;
-            } else if (resourceCount >= exportSettings.displayRows) {
+            } else if (resourceCount >= maxRows) {
               break;
             }
           }
         } else if (exportData.resources) {
           for (const resource of exportData.resources) {
-            if (resourceCount < exportSettings.displayRows) {
+            if (resourceCount < maxRows) {
               lines.push(JSON.stringify(resource, null, 0));
               resourceCount++;
             } else {
@@ -323,25 +346,26 @@ export function ExportPreview() {
         }
         
         // Add truncation message if we hit the limit
-        if (resourceCount >= exportSettings.displayRows && exportData.summary.totalResources > exportSettings.displayRows) {
-          lines.push(`// ... ${exportData.summary.totalResources - exportSettings.displayRows} more resources (limited to ${exportSettings.displayRows} for preview)`);
+        if (resourceCount >= maxRows && exportData.summary.totalResources > maxRows) {
+          lines.push(`// ... ${exportData.summary.totalResources - maxRows} more resources (limited to ${maxRows} for preview)`);
         }
         
         return lines.join('\n');
       } else {
         // Regular JSON format with truncation
         let dataToDisplay = exportData;
+        const maxRows = exportSettings.displayRows === -1 ? Infinity : exportSettings.displayRows;
         
         // Truncate if we have too many resources
-        if (exportData.bundle && exportData.bundle.entry && exportData.bundle.entry.length > exportSettings.displayRows) {
+        if (exportData.bundle && exportData.bundle.entry && exportData.bundle.entry.length > maxRows) {
           dataToDisplay = {
             ...exportData,
             bundle: {
               ...exportData.bundle,
-              entry: exportData.bundle.entry.slice(0, exportSettings.displayRows)
+              entry: exportData.bundle.entry.slice(0, maxRows)
             },
             truncated: true,
-            displayedResources: exportSettings.displayRows,
+            displayedResources: maxRows,
             totalResources: exportData.bundle.entry.length
           };
         }
@@ -361,6 +385,16 @@ export function ExportPreview() {
     if (sizeInBytes < 1024) return `${sizeInBytes} bytes`;
     if (sizeInBytes < 1024 * 1024) return `${(sizeInBytes / 1024).toFixed(1)} KB`;
     return `${(sizeInBytes / (1024 * 1024)).toFixed(1)} MB`;
+  };
+
+  // FIXED: Get actual displayed resource count based on current settings
+  const getDisplayedResourceCount = function() {
+    if (!exportData) return 0;
+    
+    const totalResources = get(exportData, 'summary.totalResources', 0);
+    const maxDisplayRows = exportSettings.displayRows === -1 ? totalResources : exportSettings.displayRows;
+    
+    return Math.min(totalResources, maxDisplayRows);
   };
 
   if (!Meteor.userId()) {
@@ -405,8 +439,6 @@ export function ExportPreview() {
             >
               {downloading ? 'Downloading...' : 'Download'}
             </Button>
-            
-            
           </Box>
         </Box>
       </Box>
@@ -433,6 +465,19 @@ export function ExportPreview() {
                   Export Settings
                 </Typography>
               </Box>
+
+              {/* FIXED: Filename input field */}
+              <TextField
+                fullWidth
+                label="Download Filename"
+                value={filename}
+                onChange={function(e) { setFilename(e.target.value); }}
+                helperText="File extension will be updated based on format"
+                InputProps={{
+                  startAdornment: <EditIcon sx={{ mr: 1, color: 'text.secondary' }} />
+                }}
+                sx={{ mb: 2 }}
+              />
 
               {/* Format Selection */}
               <FormControl fullWidth sx={{ mb: 2 }}>
@@ -575,8 +620,8 @@ export function ExportPreview() {
                       <PreviewIcon color="secondary" />
                     </ListItemIcon>
                     <ListItemText
-                      primary="Preview Limit"
-                      secondary={exportSettings.displayRows === -1 ? 'All' : exportSettings.displayRows}
+                      primary="Showing Resources"
+                      secondary={`${getDisplayedResourceCount()} of ${get(exportData, 'summary.totalResources', 0)}`}
                     />
                   </ListItem>
                   
@@ -638,14 +683,15 @@ export function ExportPreview() {
                   
                   {exportData && (
                     <Box display="flex" alignItems="center" gap={1}>
+                      {/* FIXED: Updated chip to show actual displayed count */}
                       <Chip
-                        label={`${get(exportData, 'summary.totalResources', 0)} total resources`}
+                        label={`${getDisplayedResourceCount()} of ${get(exportData, 'summary.totalResources', 0)} resources`}
                         color="primary"
                         size="small"
                       />
                       {exportSettings.displayRows !== -1 && exportSettings.displayRows < get(exportData, 'summary.totalResources', 0) && (
                         <Chip
-                          label={`Showing ${exportSettings.displayRows}`}
+                          label={`Preview Limited`}
                           color="warning"
                           size="small"
                         />
