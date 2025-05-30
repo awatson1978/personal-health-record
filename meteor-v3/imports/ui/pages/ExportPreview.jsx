@@ -87,7 +87,7 @@ export function ExportPreview() {
   const [downloading, setDownloading] = useState(false);
   const [debugInfo, setDebugInfo] = useState(null);
   
-  // Export settings
+  // FIXED: Export settings with correct default for displayRows
   const [exportSettings, setExportSettings] = useState({
     format: 'ndjson',
     prettyPrint: true,
@@ -96,7 +96,7 @@ export function ExportPreview() {
     fontSize: 14,
     wordWrap: false,
     resourceTypes: ['all'],
-    displayRows: 1000
+    displayRows: 100 // FIXED: Changed from 1000 to 100
   });
 
   // FIXED: Add filename state with default value based on current settings
@@ -149,7 +149,8 @@ export function ExportPreview() {
             filters: filters,
             format: exportSettings.format,
             includeMetadata: exportSettings.includeMetadata,
-            resourceTypes: exportSettings.resourceTypes
+            resourceTypes: exportSettings.resourceTypes,
+            previewLimit: exportSettings.displayRows === -1 ? 10000 : exportSettings.displayRows // FIXED: Pass client's displayRows to server
           }, function(error, result) {
             if (error) {
               console.error('🔍 DEBUG: Error in export.generatePreview:', error);
@@ -311,139 +312,227 @@ export function ExportPreview() {
     }
   };
 
-  // FIXED: Format the data for display with proper row limiting
-  const getDisplayData = function() {
+  // FIXED: Use useMemo to calculate display data and track row count without causing re-renders
+  const { displayData, actualDisplayedRows, debugInfo: displayDebugInfo } = React.useMemo(function() {
     if (!exportData) {
-      return '// No export data available\n// Debug info below:\n' + 
-            JSON.stringify(debugInfo, null, 2);
+      return {
+        displayData: '// No export data available\n// Debug info below:\n' + 
+                    JSON.stringify(debugInfo, null, 2),
+        actualDisplayedRows: 0,
+        debugInfo: { message: 'No export data' }
+      };
     }
     
     try {
       const maxRows = exportSettings.displayRows === -1 ? Infinity : exportSettings.displayRows;
+      console.log('🔍 DEBUG: Processing with maxRows:', maxRows, 'format:', exportSettings.format);
+      console.log('🔍 DEBUG: exportData keys:', Object.keys(exportData));
+      console.log('🔍 DEBUG: exportData.summary:', exportData.summary);
+      
+      let actualRows = 0;
+      let totalAvailableResources = 0;
+      let processedStructure = '';
       
       if (exportSettings.format === 'ndjson') {
-        // Convert to NDJSON format - each resource on its own line
+        // NDJSON format - each resource on its own line
         const lines = [];
-        let resourceCount = 0;
         
         if (exportData.bundle && exportData.bundle.entry) {
-          for (const entry of exportData.bundle.entry) {
-            if (entry.resource && resourceCount < maxRows) {
+          totalAvailableResources = exportData.bundle.entry.length;
+          processedStructure = 'bundle.entry';
+          console.log('🔍 DEBUG: Processing bundle.entry with', totalAvailableResources, 'items');
+          
+          for (let i = 0; i < exportData.bundle.entry.length && actualRows < maxRows; i++) {
+            const entry = exportData.bundle.entry[i];
+            if (entry.resource) {
               lines.push(JSON.stringify(entry.resource, null, 0));
-              resourceCount++;
-            } else if (resourceCount >= maxRows) {
-              break;
+              actualRows++;
             }
           }
         } else if (exportData.resources) {
-          // Handle array of resources
+          processedStructure = 'resources';
+          console.log('🔍 DEBUG: Processing resources');
+          
           if (Array.isArray(exportData.resources)) {
-            for (const resource of exportData.resources) {
-              if (resourceCount < maxRows) {
-                lines.push(JSON.stringify(resource, null, 0));
-                resourceCount++;
-              } else {
-                break;
-              }
+            totalAvailableResources = exportData.resources.length;
+            processedStructure = 'resources (array)';
+            console.log('🔍 DEBUG: Resources is array with', totalAvailableResources, 'items');
+            
+            for (let i = 0; i < exportData.resources.length && actualRows < maxRows; i++) {
+              lines.push(JSON.stringify(exportData.resources[i], null, 0));
+              actualRows++;
             }
           } else {
-            // Handle object with resource types as keys
+            processedStructure = 'resources (object)';
+            console.log('🔍 DEBUG: Resources is object with keys:', Object.keys(exportData.resources));
+            
+            // Count total first
             for (const [resourceType, resourceArray] of Object.entries(exportData.resources)) {
               if (Array.isArray(resourceArray)) {
-                for (const resource of resourceArray) {
-                  if (resourceCount < maxRows) {
-                    lines.push(JSON.stringify(resource, null, 0));
-                    resourceCount++;
-                  } else {
-                    break;
-                  }
+                totalAvailableResources += resourceArray.length;
+              }
+            }
+            
+            // Then process with limit
+            for (const [resourceType, resourceArray] of Object.entries(exportData.resources)) {
+              if (Array.isArray(resourceArray)) {
+                console.log(`🔍 DEBUG: Processing ${resourceType} with ${resourceArray.length} items (actualRows: ${actualRows}/${maxRows})`);
+                for (let i = 0; i < resourceArray.length && actualRows < maxRows; i++) {
+                  lines.push(JSON.stringify(resourceArray[i], null, 0));
+                  actualRows++;
                 }
-                if (resourceCount >= maxRows) break;
+                if (actualRows >= maxRows) {
+                  console.log(`🔍 DEBUG: Hit maxRows limit at ${actualRows}, breaking`);
+                  break;
+                }
               }
             }
           }
         }
         
         // Add truncation message if we hit the limit
-        if (resourceCount >= maxRows && exportData.summary.totalResources > maxRows) {
-          lines.push(`// ... ${exportData.summary.totalResources - maxRows} more resources (limited to ${maxRows} for preview)`);
+        if (actualRows >= maxRows && totalAvailableResources > maxRows) {
+          lines.push(`// ... ${totalAvailableResources - maxRows} more resources (limited to ${maxRows} for preview)`);
         }
         
-        return lines.join('\n');
+        const finalLines = lines.length;
+        console.log('🔍 DEBUG: NDJSON - created', finalLines, 'lines from', actualRows, 'resources out of', totalAvailableResources, 'available');
+        
+        return {
+          displayData: lines.join('\n'),
+          actualDisplayedRows: actualRows,
+          debugInfo: {
+            format: 'ndjson',
+            structure: processedStructure,
+            actualRows,
+            totalAvailableResources,
+            finalLines,
+            maxRows,
+            limitReached: actualRows >= maxRows
+          }
+        };
         
       } else {
         // Regular JSON format with truncation
-        let dataToDisplay = exportData;
+        let dataToDisplay = { ...exportData };
+        processedStructure = 'json';
         
-        // Truncate if we have too many resources
-        if (exportData.bundle && exportData.bundle.entry && exportData.bundle.entry.length > maxRows) {
-          dataToDisplay = {
-            ...exportData,
-            bundle: {
+        if (exportData.bundle && exportData.bundle.entry) {
+          totalAvailableResources = exportData.bundle.entry.length;
+          processedStructure = 'json bundle.entry';
+          console.log('🔍 DEBUG: JSON - Processing bundle.entry with', totalAvailableResources, 'items, maxRows:', maxRows);
+          
+          if (exportData.bundle.entry.length > maxRows) {
+            dataToDisplay.bundle = {
               ...exportData.bundle,
               entry: exportData.bundle.entry.slice(0, maxRows)
-            },
-            truncated: true,
-            displayedResources: maxRows,
-            totalResources: exportData.bundle.entry.length
-          };
+            };
+            dataToDisplay.truncated = true;
+            dataToDisplay.displayedResources = maxRows;
+            dataToDisplay.totalResources = exportData.bundle.entry.length;
+            actualRows = maxRows;
+          } else {
+            actualRows = exportData.bundle.entry.length;
+          }
         } else if (exportData.resources) {
-          // Handle resources object truncation
-          const truncatedResources = {};
-          let totalResourceCount = 0;
-          let displayedResourceCount = 0;
+          processedStructure = 'json resources';
           
-          // Count total resources first
           if (Array.isArray(exportData.resources)) {
-            totalResourceCount = exportData.resources.length;
-            if (totalResourceCount > maxRows) {
-              dataToDisplay = {
-                ...exportData,
-                resources: exportData.resources.slice(0, maxRows),
-                truncated: true,
-                displayedResources: maxRows,
-                totalResources: totalResourceCount
-              };
+            totalAvailableResources = exportData.resources.length;
+            processedStructure = 'json resources (array)';
+            console.log('🔍 DEBUG: JSON - Processing resources array with', totalAvailableResources, 'items');
+            
+            if (exportData.resources.length > maxRows) {
+              dataToDisplay.resources = exportData.resources.slice(0, maxRows);
+              dataToDisplay.truncated = true;
+              dataToDisplay.displayedResources = maxRows;
+              dataToDisplay.totalResources = exportData.resources.length;
+              actualRows = maxRows;
+            } else {
+              actualRows = exportData.resources.length;
             }
           } else {
             // Handle object with resource types
+            processedStructure = 'json resources (object)';
+            console.log('🔍 DEBUG: JSON - Processing resources object');
+            const truncatedResources = {};
+            let displayedResourceCount = 0;
+            
+            // Count total resources first
             for (const [type, resources] of Object.entries(exportData.resources)) {
               if (Array.isArray(resources)) {
-                totalResourceCount += resources.length;
+                totalAvailableResources += resources.length;
               }
             }
             
-            if (totalResourceCount > maxRows) {
+            console.log('🔍 DEBUG: Total resource count:', totalAvailableResources, 'maxRows:', maxRows);
+            
+            if (totalAvailableResources > maxRows) {
               // Truncate across resource types
               for (const [type, resources] of Object.entries(exportData.resources)) {
                 if (Array.isArray(resources) && displayedResourceCount < maxRows) {
                   const remainingSlots = maxRows - displayedResourceCount;
-                  truncatedResources[type] = resources.slice(0, remainingSlots);
-                  displayedResourceCount += Math.min(resources.length, remainingSlots);
+                  const slicedResources = resources.slice(0, remainingSlots);
+                  truncatedResources[type] = slicedResources;
+                  displayedResourceCount += slicedResources.length;
+                  console.log(`🔍 DEBUG: Added ${slicedResources.length} ${type} resources (total now: ${displayedResourceCount})`);
                 } else if (displayedResourceCount < maxRows) {
                   truncatedResources[type] = resources;
+                  displayedResourceCount += resources.length;
+                  console.log(`🔍 DEBUG: Added all ${resources.length} ${type} resources (total now: ${displayedResourceCount})`);
+                }
+                
+                if (displayedResourceCount >= maxRows) {
+                  console.log(`🔍 DEBUG: Hit maxRows limit at ${displayedResourceCount}, breaking`);
+                  break;
                 }
               }
               
-              dataToDisplay = {
-                ...exportData,
-                resources: truncatedResources,
-                truncated: true,
-                displayedResources: displayedResourceCount,
-                totalResources: totalResourceCount
-              };
+              dataToDisplay.resources = truncatedResources;
+              dataToDisplay.truncated = true;
+              dataToDisplay.displayedResources = displayedResourceCount;
+              dataToDisplay.totalResources = totalAvailableResources;
+              actualRows = displayedResourceCount;
+            } else {
+              actualRows = totalAvailableResources;
             }
           }
         }
         
-        return JSON.stringify(dataToDisplay, null, exportSettings.prettyPrint ? 2 : 0);
+        const jsonString = JSON.stringify(dataToDisplay, null, exportSettings.prettyPrint ? 2 : 0);
+        const jsonLines = jsonString.split('\n').length;
+        
+        console.log('🔍 DEBUG: JSON - displaying', actualRows, 'resources as', jsonLines, 'lines out of', totalAvailableResources, 'available');
+        
+        return {
+          displayData: jsonString,
+          actualDisplayedRows: actualRows,
+          debugInfo: {
+            format: 'json',
+            structure: processedStructure,
+            actualRows,
+            totalAvailableResources,
+            jsonLines,
+            maxRows,
+            limitReached: actualRows >= maxRows,
+            prettyPrint: exportSettings.prettyPrint
+          }
+        };
       }
     } catch (error) {
-      return `Error formatting data: ${error.message}\n\nDebug info:\n${JSON.stringify(debugInfo, null, 2)}`;
+      console.error('🔍 DEBUG: Error in useMemo:', error);
+      return {
+        displayData: `Error formatting data: ${error.message}\n\nDebug info:\n${JSON.stringify(debugInfo, null, 2)}`,
+        actualDisplayedRows: 0,
+        debugInfo: { error: error.message }
+      };
     }
+  }, [exportData, exportSettings.displayRows, exportSettings.format, exportSettings.prettyPrint, debugInfo]);
+
+  // FIXED: Completely rewritten getDisplayData function with proper row limiting
+  const getDisplayData = function() {
+    return displayData;
   };
-
-
 
   // Get file size estimate
   const getFileSizeEstimate = function() {
@@ -455,14 +544,9 @@ export function ExportPreview() {
     return `${(sizeInBytes / (1024 * 1024)).toFixed(1)} MB`;
   };
 
-  // FIXED: Get actual displayed resource count based on current settings
+  // FIXED: Simplified getDisplayedResourceCount to use actualDisplayedRows
   const getDisplayedResourceCount = function() {
-    if (!exportData) return 0;
-    
-    const totalResources = get(exportData, 'summary.totalResources', 0);
-    const maxDisplayRows = exportSettings.displayRows === -1 ? totalResources : exportSettings.displayRows;
-    
-    return Math.min(totalResources, maxDisplayRows);
+    return actualDisplayedRows;
   };
 
   if (!Meteor.userId()) {
@@ -561,14 +645,18 @@ export function ExportPreview() {
                 </Select>
               </FormControl>
 
-              {/* Display Rows Selector */}
+              {/* FIXED: Display Rows Selector with correct default */}
               <FormControl fullWidth sx={{ mb: 2 }}>
                 <InputLabel>Preview Rows</InputLabel>
                 <Select
                   value={exportSettings.displayRows}
                   label="Preview Rows"
-                  onChange={function(e) { handleSettingChange('displayRows', e.target.value); }}
+                  onChange={function(e) { 
+                    console.log('🔍 DEBUG: Preview rows changed to:', e.target.value);
+                    handleSettingChange('displayRows', e.target.value); 
+                  }}
                 >
+                  <MenuItem value={50}>50 rows</MenuItem>
                   <MenuItem value={100}>100 rows</MenuItem>
                   <MenuItem value={200}>200 rows</MenuItem>
                   <MenuItem value={500}>500 rows</MenuItem>
@@ -731,6 +819,26 @@ export function ExportPreview() {
                     })}
                   </Box>
                 )}
+
+                {/* FIXED: Enhanced debug info showing processing details */}
+                <Box sx={{ mt: 2, p: 1, bgcolor: 'grey.100', borderRadius: 1 }}>
+                  <Typography variant="caption" component="div">
+                    <strong>Debug:</strong> displayRows={exportSettings.displayRows}, actualDisplayedRows={actualDisplayedRows}
+                  </Typography>
+                  {displayDebugInfo && (
+                    <Typography variant="caption" component="div" sx={{ mt: 0.5 }}>
+                      <strong>Structure:</strong> {displayDebugInfo.structure}, 
+                      <strong> Available:</strong> {displayDebugInfo.totalAvailableResources}, 
+                      <strong> Format:</strong> {displayDebugInfo.format}
+                      {displayDebugInfo.jsonLines && (
+                        <span>, <strong>JSON Lines:</strong> {displayDebugInfo.jsonLines}</span>
+                      )}
+                      {displayDebugInfo.finalLines && (
+                        <span>, <strong>NDJSON Lines:</strong> {displayDebugInfo.finalLines}</span>
+                      )}
+                    </Typography>
+                  )}
+                </Box>
               </CardContent>
             </Card>
           )}
@@ -751,7 +859,7 @@ export function ExportPreview() {
                   
                   {exportData && (
                     <Box display="flex" alignItems="center" gap={1}>
-                      {/* FIXED: Updated chip to show actual displayed count */}
+                      {/* FIXED: Chip now shows actual displayed count from state */}
                       <Chip
                         label={`${getDisplayedResourceCount()} of ${get(exportData, 'summary.totalResources', 0)} resources`}
                         color="primary"

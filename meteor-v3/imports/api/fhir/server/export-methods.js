@@ -28,7 +28,8 @@ Meteor.methods({
       }),
       format: Match.Optional(String),
       includeMetadata: Match.Optional(Boolean),
-      resourceTypes: Match.Optional([String])
+      resourceTypes: Match.Optional([String]),
+      previewLimit: Match.Optional(Number) // FIXED: Add previewLimit parameter
     });
 
     if (!this.userId) {
@@ -40,13 +41,14 @@ Meteor.methods({
       const format = get(options, 'format', 'bundle');
       const includeMetadata = get(options, 'includeMetadata', true);
       const resourceTypes = get(options, 'resourceTypes', ['all']);
+      const previewLimit = get(options, 'previewLimit', 100); // FIXED: Use client's previewLimit, default to 100
 
-      console.log(`📊 Generating export preview for user ${this.userId}:`, { filters, format, resourceTypes });
+      console.log(`📊 Generating export preview for user ${this.userId}:`, { filters, format, resourceTypes, previewLimit });
 
-      // Get the full timeline data (limited preview)
+      // Get the full timeline data with the requested limit
       const timelineResult = await Meteor.call('timeline.getData', {
         page: 1,
-        limit: 100, // Preview limit
+        limit: Math.min(previewLimit, 10000), // FIXED: Use previewLimit instead of hardcoded 100, cap at 10k
         filters: filters
       });
 
@@ -77,7 +79,7 @@ Meteor.methods({
         generatedAt: new Date(),
         format: format,
         preview: true,
-        previewLimit: 100,
+        previewLimit: previewLimit, // FIXED: Include the actual limit used
         actualTotal: timelineResult.totalCount
       };
 
@@ -92,7 +94,7 @@ Meteor.methods({
         summary: summary
       };
 
-      console.log(`✅ Export preview generated: ${filteredItems.length} resources`);
+      console.log(`✅ Export preview generated: ${filteredItems.length} resources (requested: ${previewLimit})`);
       return result;
 
     } catch (error) {
