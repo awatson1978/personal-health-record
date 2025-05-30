@@ -46,7 +46,8 @@ import {
   Code as CodeIcon,
   Refresh as RefreshIcon,
   BugReport as DebugIcon,
-  Edit as EditIcon
+  Edit as EditIcon,
+  Speed as SpeedIcon
 } from '@mui/icons-material';
 
 import AceEditor from 'react-ace';
@@ -86,8 +87,9 @@ export function ExportPreview() {
   const [error, setError] = useState(null);
   const [downloading, setDownloading] = useState(false);
   const [debugInfo, setDebugInfo] = useState(null);
+  const [performanceWarningShown, setPerformanceWarningShown] = useState(false);
   
-  // FIXED: Export settings - displayRows now only affects client-side display
+  // ENHANCED: Export settings with expanded limits up to 1 million
   const [exportSettings, setExportSettings] = useState({
     format: 'ndjson',
     prettyPrint: true,
@@ -96,13 +98,76 @@ export function ExportPreview() {
     fontSize: 14,
     wordWrap: false,
     resourceTypes: ['all'],
-    displayRows: 100 // This now only controls client-side display
+    displayRows: 1000 // ENHANCED: Increased default to 1000
   });
 
   // Filename state
   const [filename, setFilename] = useState(function() {
     return `fhir-export-${moment().format('YYYY-MM-DD-HHmm')}`;
   });
+
+  // ENHANCED: Performance warning dialog state
+  const [performanceDialogOpen, setPerformanceDialogOpen] = useState(false);
+  const [pendingDisplayRows, setPendingDisplayRows] = useState(null);
+
+  // ENHANCED: Get display options with performance warnings
+  const getDisplayRowsOptions = function() {
+    return [
+      { value: 50, label: '50 rows', performance: 'fast' },
+      { value: 100, label: '100 rows', performance: 'fast' },
+      { value: 200, label: '200 rows', performance: 'fast' },
+      { value: 500, label: '500 rows', performance: 'fast' },
+      { value: 1000, label: '1000 rows', performance: 'fast' },
+      { value: 5000, label: '5000 rows', performance: 'moderate' },
+      { value: 10000, label: '10,000 rows', performance: 'slow' },
+      { value: 100000, label: '100,000 rows', performance: 'very-slow' },
+      { value: 1000000, label: '1,000,000 rows', performance: 'extremely-slow' },
+      { value: -1, label: 'All rows', performance: 'extremely-slow' }
+    ];
+  };
+
+  // ENHANCED: Get performance info for a given row count
+  const getPerformanceInfo = function(rowCount) {
+    if (rowCount === -1) return { level: 'extremely-slow', warning: 'May cause browser to freeze with large datasets' };
+    if (rowCount >= 1000000) return { level: 'extremely-slow', warning: 'Very large dataset - may take 30+ seconds to render' };
+    if (rowCount >= 100000) return { level: 'very-slow', warning: 'Large dataset - may take 10+ seconds to render' };
+    if (rowCount >= 10000) return { level: 'slow', warning: 'May take a few seconds to render' };
+    if (rowCount >= 5000) return { level: 'moderate', warning: 'Moderate rendering time' };
+    return { level: 'fast', warning: null };
+  };
+
+  // ENHANCED: Handle display rows change with performance warning
+  const handleDisplayRowsChange = function(newValue) {
+    const performanceInfo = getPerformanceInfo(newValue);
+    
+    // Show warning for slow performance options
+    if (performanceInfo.level === 'slow' || performanceInfo.level === 'very-slow' || performanceInfo.level === 'extremely-slow') {
+      if (!performanceWarningShown || newValue >= 100000) {
+        setPendingDisplayRows(newValue);
+        setPerformanceDialogOpen(true);
+        return;
+      }
+    }
+    
+    // Apply the change immediately for fast options
+    handleSettingChange('displayRows', newValue);
+  };
+
+  // ENHANCED: Confirm performance warning and apply setting
+  const confirmPerformanceChange = function() {
+    if (pendingDisplayRows !== null) {
+      handleSettingChange('displayRows', pendingDisplayRows);
+      setPerformanceWarningShown(true);
+      setPerformanceDialogOpen(false);
+      setPendingDisplayRows(null);
+    }
+  };
+
+  // ENHANCED: Cancel performance warning
+  const cancelPerformanceChange = function() {
+    setPerformanceDialogOpen(false);
+    setPendingDisplayRows(null);
+  };
 
   // Load export preview data
   const loadExportPreview = async function() {
@@ -144,13 +209,17 @@ export function ExportPreview() {
         
         console.log('🔍 DEBUG: We have data, calling export.generatePreview...');
         
+        // ENHANCED: Calculate server limit based on displayRows, capped at reasonable server limits
+        const serverLimit = exportSettings.displayRows === -1 ? 50000 : Math.min(exportSettings.displayRows, 50000);
+        console.log('🔍 DEBUG: Using server limit:', serverLimit, 'for displayRows:', exportSettings.displayRows);
+        
         const result = await new Promise(function(resolve, reject) {
           Meteor.call('export.generatePreview', {
             filters: filters,
             format: exportSettings.format,
             includeMetadata: exportSettings.includeMetadata,
             resourceTypes: exportSettings.resourceTypes,
-            previewLimit: 5000 // FIXED: Always fetch a large amount from server (5000 resources)
+            previewLimit: serverLimit // ENHANCED: Use calculated server limit
           }, function(error, result) {
             if (error) {
               console.error('🔍 DEBUG: Error in export.generatePreview:', error);
@@ -190,8 +259,7 @@ export function ExportPreview() {
     }
   };
 
-  // FIXED: Load data on mount and when server-relevant settings change
-  // Removed exportSettings.displayRows from dependencies since it's now client-only
+  // Load data on mount and when server-relevant settings change
   useEffect(function() {
     if (Meteor.userId()) {
       console.log('🔍 DEBUG: Component mounted, user ID:', Meteor.userId());
@@ -200,7 +268,6 @@ export function ExportPreview() {
       console.log('🔍 DEBUG: No user ID, skipping load');
     }
   }, [Meteor.userId(), exportSettings.format, exportSettings.includeMetadata, exportSettings.resourceTypes]);
-  // REMOVED: exportSettings.displayRows from dependencies - now it's client-side only!
 
   // Update filename when format changes
   useEffect(function() {
@@ -314,7 +381,7 @@ export function ExportPreview() {
     }
   };
 
-  // FIXED: Optimized useMemo with client-side only row limiting
+  // ENHANCED: Optimized useMemo with client-side only row limiting (now supports up to 1M)
   const { displayData, actualDisplayedRows, debugInfo: displayDebugInfo } = React.useMemo(function() {
     if (!exportData) {
       return {
@@ -326,7 +393,7 @@ export function ExportPreview() {
     }
     
     try {
-      // FIXED: Use displayRows for client-side limiting only
+      // ENHANCED: Use displayRows for client-side limiting (now supports up to 1M)
       const maxRows = exportSettings.displayRows === -1 ? Infinity : exportSettings.displayRows;
       console.log('🔍 DEBUG: Client-side limiting with maxRows:', maxRows, 'format:', exportSettings.format);
       console.log('🔍 DEBUG: exportData keys:', Object.keys(exportData));
@@ -395,7 +462,7 @@ export function ExportPreview() {
         
         // Add truncation message if we hit the limit
         if (actualRows >= maxRows && totalAvailableResources > maxRows) {
-          lines.push(`// ... ${totalAvailableResources - maxRows} more resources (limited to ${maxRows} for preview)`);
+          lines.push(`// ... ${totalAvailableResources - maxRows} more resources (limited to ${maxRows.toLocaleString()} for preview)`);
         }
         
         const finalLines = lines.length;
@@ -531,7 +598,6 @@ export function ExportPreview() {
       };
     }
   }, [exportData, exportSettings.displayRows, exportSettings.format, exportSettings.prettyPrint, debugInfo]);
-  // FIXED: Now displayRows changes will immediately update the display without server calls
 
   // Get display data
   const getDisplayData = function() {
@@ -649,7 +715,7 @@ export function ExportPreview() {
                 </Select>
               </FormControl>
 
-              {/* FIXED: Preview Rows Selector - now affects only client-side display */}
+              {/* ENHANCED: Preview Rows Selector with expanded options and performance indicators */}
               <FormControl fullWidth sx={{ mb: 2 }}>
                 <InputLabel>Preview Rows</InputLabel>
                 <Select
@@ -657,18 +723,35 @@ export function ExportPreview() {
                   label="Preview Rows"
                   onChange={function(e) { 
                     console.log('🔍 DEBUG: Preview rows changed to:', e.target.value);
-                    handleSettingChange('displayRows', e.target.value); 
+                    handleDisplayRowsChange(e.target.value); 
                   }}
                 >
-                  <MenuItem value={50}>50 rows</MenuItem>
-                  <MenuItem value={100}>100 rows</MenuItem>
-                  <MenuItem value={200}>200 rows</MenuItem>
-                  <MenuItem value={500}>500 rows</MenuItem>
-                  <MenuItem value={1000}>1000 rows</MenuItem>
-                  <MenuItem value={5000}>5000 rows</MenuItem>
-                  <MenuItem value={-1}>All rows</MenuItem>
+                  {getDisplayRowsOptions().map(function(option) {
+                    return (
+                      <MenuItem key={option.value} value={option.value}>
+                        <Box display="flex" alignItems="center" justifyContent="space-between" width="100%">
+                          <span>{option.label}</span>
+                          {option.performance === 'slow' && (
+                            <SpeedIcon sx={{ fontSize: 16, color: 'warning.main', ml: 1 }} />
+                          )}
+                          {(option.performance === 'very-slow' || option.performance === 'extremely-slow') && (
+                            <WarningIcon sx={{ fontSize: 16, color: 'error.main', ml: 1 }} />
+                          )}
+                        </Box>
+                      </MenuItem>
+                    );
+                  })}
                 </Select>
               </FormControl>
+
+              {/* ENHANCED: Show performance warning for current selection */}
+              {exportSettings.displayRows > 5000 && (
+                <Alert severity="warning" sx={{ mb: 2, fontSize: '0.75rem' }}>
+                  <Typography variant="caption">
+                    {getPerformanceInfo(exportSettings.displayRows).warning}
+                  </Typography>
+                </Alert>
+              )}
 
               {/* Editor Theme */}
               <FormControl fullWidth sx={{ mb: 2 }}>
@@ -770,7 +853,7 @@ export function ExportPreview() {
                     </ListItemIcon>
                     <ListItemText
                       primary="Total Resources"
-                      secondary={get(exportData, 'summary.totalResources', 0)}
+                      secondary={get(exportData, 'summary.totalResources', 0).toLocaleString()}
                     />
                   </ListItem>
                   
@@ -780,7 +863,7 @@ export function ExportPreview() {
                     </ListItemIcon>
                     <ListItemText
                       primary="Showing Resources"
-                      secondary={`${getDisplayedResourceCount()} of ${get(exportData, 'summary.totalResources', 0)}`}
+                      secondary={`${getDisplayedResourceCount().toLocaleString()} of ${get(exportData, 'summary.totalResources', 0).toLocaleString()}`}
                     />
                   </ListItem>
                   
@@ -814,7 +897,7 @@ export function ExportPreview() {
                       return (
                         <Chip
                           key={type}
-                          label={`${type}: ${count}`}
+                          label={`${type}: ${count.toLocaleString()}`}
                           size="small"
                           sx={{ mr: 0.5, mb: 0.5 }}
                         />
@@ -826,18 +909,18 @@ export function ExportPreview() {
                 {/* Enhanced debug info showing processing details */}
                 <Box sx={{ mt: 2, p: 1, bgcolor: 'grey.100', borderRadius: 1 }}>
                   <Typography variant="caption" component="div">
-                    <strong>Debug:</strong> displayRows={exportSettings.displayRows}, actualDisplayedRows={actualDisplayedRows}
+                    <strong>Debug:</strong> displayRows={exportSettings.displayRows === -1 ? 'All' : exportSettings.displayRows.toLocaleString()}, actualDisplayedRows={actualDisplayedRows.toLocaleString()}
                   </Typography>
                   {displayDebugInfo && (
                     <Typography variant="caption" component="div" sx={{ mt: 0.5 }}>
                       <strong>Structure:</strong> {displayDebugInfo.structure}, 
-                      <strong> Available:</strong> {displayDebugInfo.totalAvailableResources}, 
+                      <strong> Available:</strong> {displayDebugInfo.totalAvailableResources?.toLocaleString()}, 
                       <strong> Format:</strong> {displayDebugInfo.format}
                       {displayDebugInfo.jsonLines && (
-                        <span>, <strong>JSON Lines:</strong> {displayDebugInfo.jsonLines}</span>
+                        <span>, <strong>JSON Lines:</strong> {displayDebugInfo.jsonLines.toLocaleString()}</span>
                       )}
                       {displayDebugInfo.finalLines && (
-                        <span>, <strong>NDJSON Lines:</strong> {displayDebugInfo.finalLines}</span>
+                        <span>, <strong>NDJSON Lines:</strong> {displayDebugInfo.finalLines.toLocaleString()}</span>
                       )}
                     </Typography>
                   )}
@@ -864,7 +947,7 @@ export function ExportPreview() {
                     <Box display="flex" alignItems="center" gap={1}>
                       {/* Chip shows actual displayed count from state */}
                       <Chip
-                        label={`${getDisplayedResourceCount()} of ${get(exportData, 'summary.totalResources', 0)} resources`}
+                        label={`${getDisplayedResourceCount().toLocaleString()} of ${get(exportData, 'summary.totalResources', 0).toLocaleString()} resources`}
                         color="primary"
                         size="small"
                       />
@@ -873,6 +956,15 @@ export function ExportPreview() {
                           label={`Preview Limited`}
                           color="warning"
                           size="small"
+                        />
+                      )}
+                      {/* ENHANCED: Performance indicator */}
+                      {exportSettings.displayRows > 10000 && (
+                        <Chip
+                          label="Large Dataset"
+                          color="error"
+                          size="small"
+                          icon={<WarningIcon />}
                         />
                       )}
                     </Box>
@@ -935,6 +1027,69 @@ export function ExportPreview() {
           </Card>
         </Grid>
       </Grid>
+
+      {/* ENHANCED: Performance Warning Dialog */}
+      <Dialog 
+        open={performanceDialogOpen} 
+        onClose={cancelPerformanceChange}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle>
+          <Box display="flex" alignItems="center">
+            <WarningIcon color="warning" sx={{ mr: 1 }} />
+            Performance Warning
+          </Box>
+        </DialogTitle>
+        <DialogContent>
+          <Box sx={{ mb: 2 }}>
+            <Typography variant="body1" paragraph>
+              You've selected to display <strong>{pendingDisplayRows === -1 ? 'all rows' : pendingDisplayRows?.toLocaleString()}</strong> which may cause:
+            </Typography>
+            
+            <Box component="ul" sx={{ pl: 2, mb: 2 }}>
+              <Typography component="li" variant="body2" sx={{ mb: 0.5 }}>
+                Slow browser performance while rendering
+              </Typography>
+              <Typography component="li" variant="body2" sx={{ mb: 0.5 }}>
+                High memory usage (especially on mobile devices)
+              </Typography>
+              {pendingDisplayRows >= 100000 && (
+                <Typography component="li" variant="body2" sx={{ mb: 0.5 }}>
+                  <strong>Browser may freeze</strong> for 10+ seconds during rendering
+                </Typography>
+              )}
+              {pendingDisplayRows >= 1000000 && (
+                <Typography component="li" variant="body2" sx={{ mb: 0.5, color: 'error.main' }}>
+                  <strong>Very high risk</strong> of browser crash on older devices
+                </Typography>
+              )}
+            </Box>
+
+            <Alert severity={pendingDisplayRows >= 100000 ? "error" : "warning"} sx={{ mb: 2 }}>
+              <Typography variant="body2">
+                {getPerformanceInfo(pendingDisplayRows).warning}
+              </Typography>
+            </Alert>
+
+            <Typography variant="body2" color="text.secondary">
+              Consider using a smaller preview size for better performance. The full download will always include all your data regardless of preview settings.
+            </Typography>
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={cancelPerformanceChange}>
+            Cancel
+          </Button>
+          <Button 
+            onClick={confirmPerformanceChange}
+            color={pendingDisplayRows >= 100000 ? "error" : "warning"}
+            variant="contained"
+          >
+            Continue Anyway
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Container>
   );
 }
