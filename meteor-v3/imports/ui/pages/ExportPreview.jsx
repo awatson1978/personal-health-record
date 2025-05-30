@@ -32,7 +32,9 @@ import {
   ListItem,
   ListItemText,
   ListItemIcon,
-  Paper
+  Paper,
+  Tabs,
+  Tab
 } from '@mui/material';
 
 import {
@@ -47,7 +49,9 @@ import {
   Refresh as RefreshIcon,
   BugReport as DebugIcon,
   Edit as EditIcon,
-  Speed as SpeedIcon
+  Speed as SpeedIcon,
+  ViewList as ViewListIcon,
+  ViewModule as ViewModuleIcon
 } from '@mui/icons-material';
 
 import AceEditor from 'react-ace';
@@ -89,7 +93,7 @@ export function ExportPreview() {
   const [debugInfo, setDebugInfo] = useState(null);
   const [performanceWarningShown, setPerformanceWarningShown] = useState(false);
   
-  // FIXED: Export settings with no artificial client-side limits
+  // FIXED: New approach - use both display limit and rendering mode
   const [exportSettings, setExportSettings] = useState({
     format: 'ndjson',
     prettyPrint: true,
@@ -98,7 +102,9 @@ export function ExportPreview() {
     fontSize: 14,
     wordWrap: false,
     resourceTypes: ['all'],
-    displayRows: 10000 // Default to 10K but allow much higher
+    displayMode: 'smart', // 'smart', 'ace-editor', 'simple-text', 'summary-only'
+    displayLimit: 10000,   // For ACE editor mode
+    previewLimit: 100000   // For server requests
   });
 
   // Filename state
@@ -108,68 +114,58 @@ export function ExportPreview() {
 
   // Performance warning dialog state
   const [performanceDialogOpen, setPerformanceDialogOpen] = useState(false);
-  const [pendingDisplayRows, setPendingDisplayRows] = useState(null);
+  const [pendingDisplayLimit, setPendingDisplayLimit] = useState(null);
 
-  // FIXED: Get display options with much higher limits and no arbitrary caps
-  const getDisplayRowsOptions = function() {
+  // Tab state for different display modes
+  const [activeTab, setActiveTab] = useState(0);
+
+  // FIXED: Smart display mode options
+  const getDisplayModeOptions = function() {
+    if (!exportData || !exportData.summary) return [];
+    
+    const totalResources = exportData.summary.totalResources || 0;
+    
     return [
-      { value: 50, label: '50 rows', performance: 'fast' },
-      { value: 100, label: '100 rows', performance: 'fast' },
-      { value: 500, label: '500 rows', performance: 'fast' },
-      { value: 1000, label: '1000 rows', performance: 'fast' },
-      { value: 5000, label: '5000 rows', performance: 'fast' },
-      { value: 10000, label: '10,000 rows', performance: 'moderate' },
-      { value: 25000, label: '25,000 rows', performance: 'moderate' },
-      { value: 50000, label: '50,000 rows', performance: 'slow' },
-      { value: 100000, label: '100,000 rows', performance: 'slow' },
-      { value: 250000, label: '250,000 rows', performance: 'very-slow' },
-      { value: 500000, label: '500,000 rows', performance: 'very-slow' },
-      { value: 1000000, label: '1,000,000 rows', performance: 'extremely-slow' },
-      { value: -1, label: 'All rows (no limit)', performance: 'extremely-slow' }
+      {
+        mode: 'smart',
+        label: 'Smart Preview',
+        description: 'Automatically choose best display method',
+        recommended: true,
+        maxResources: 1000000
+      },
+      {
+        mode: 'ace-editor',
+        label: 'Code Editor',
+        description: 'Full-featured code editor (slower for large datasets)',
+        recommended: totalResources <= 10000,
+        maxResources: 50000
+      },
+      {
+        mode: 'simple-text',
+        label: 'Simple Text',
+        description: 'Plain text display (faster for large datasets)',
+        recommended: totalResources > 10000,
+        maxResources: 1000000
+      },
+      {
+        mode: 'summary-only',
+        label: 'Summary Only',
+        description: 'Show statistics without content',
+        recommended: totalResources > 100000,
+        maxResources: Infinity
+      }
     ];
   };
 
-  // Get performance info for a given row count
-  const getPerformanceInfo = function(rowCount) {
-    if (rowCount === -1) return { level: 'extremely-slow', warning: 'May cause browser to freeze with very large datasets' };
-    if (rowCount >= 500000) return { level: 'extremely-slow', warning: 'Very large dataset - may take 60+ seconds to render' };
-    if (rowCount >= 100000) return { level: 'very-slow', warning: 'Large dataset - may take 10+ seconds to render' };
-    if (rowCount >= 50000) return { level: 'slow', warning: 'May take a few seconds to render' };
-    if (rowCount >= 10000) return { level: 'moderate', warning: 'Moderate rendering time' };
-    return { level: 'fast', warning: null };
-  };
-
-  // Handle display rows change with performance warning
-  const handleDisplayRowsChange = function(newValue) {
-    const performanceInfo = getPerformanceInfo(newValue);
+  // FIXED: Determine optimal display mode automatically
+  const getOptimalDisplayMode = function() {
+    if (!exportData || !exportData.summary) return 'smart';
     
-    // Show warning for slow performance options
-    if (performanceInfo.level === 'slow' || performanceInfo.level === 'very-slow' || performanceInfo.level === 'extremely-slow') {
-      if (!performanceWarningShown || newValue >= 100000) {
-        setPendingDisplayRows(newValue);
-        setPerformanceDialogOpen(true);
-        return;
-      }
-    }
+    const totalResources = exportData.summary.totalResources || 0;
     
-    // Apply the change immediately for fast options
-    handleSettingChange('displayRows', newValue);
-  };
-
-  // Confirm performance warning and apply setting
-  const confirmPerformanceChange = function() {
-    if (pendingDisplayRows !== null) {
-      handleSettingChange('displayRows', pendingDisplayRows);
-      setPerformanceWarningShown(true);
-      setPerformanceDialogOpen(false);
-      setPendingDisplayRows(null);
-    }
-  };
-
-  // Cancel performance warning
-  const cancelPerformanceChange = function() {
-    setPerformanceDialogOpen(false);
-    setPendingDisplayRows(null);
+    if (totalResources <= 1000) return 'ace-editor';
+    if (totalResources <= 50000) return 'simple-text';
+    return 'summary-only';
   };
 
   // Load export preview data
@@ -180,11 +176,9 @@ export function ExportPreview() {
     
     try {
       console.log('🔍 DEBUG: Starting export preview load...');
-      console.log('🔍 DEBUG: User ID:', Meteor.userId());
-      console.log('🔍 DEBUG: Filters:', filters);
-      console.log('🔍 DEBUG: Export Settings:', exportSettings);
+      console.log('🔍 DEBUG: Preview limit:', exportSettings.previewLimit);
       
-      // First, let's try to get basic stats to see if we have any data at all
+      // First, get basic stats
       const statsResult = await new Promise(function(resolve, reject) {
         Meteor.call('dashboard.getStatistics', function(error, result) {
           if (error) {
@@ -212,17 +206,13 @@ export function ExportPreview() {
         
         console.log('🔍 DEBUG: We have data, calling export.generatePreview...');
         
-        // FIXED: Use a very large server limit to match what the server can handle
-        const serverLimit = exportSettings.displayRows === -1 ? 10000000 : Math.min(exportSettings.displayRows, 10000000);
-        console.log('🔍 DEBUG: Using server limit:', serverLimit, 'for displayRows:', exportSettings.displayRows);
-        
         const result = await new Promise(function(resolve, reject) {
           Meteor.call('export.generatePreview', {
             filters: filters,
             format: exportSettings.format,
             includeMetadata: exportSettings.includeMetadata,
             resourceTypes: exportSettings.resourceTypes,
-            previewLimit: serverLimit // Use the large server limit
+            previewLimit: exportSettings.previewLimit
           }, function(error, result) {
             if (error) {
               console.error('🔍 DEBUG: Error in export.generatePreview:', error);
@@ -235,6 +225,18 @@ export function ExportPreview() {
         });
         
         setExportData(result);
+        
+        // FIXED: Auto-adjust display mode if needed
+        if (exportSettings.displayMode === 'smart') {
+          const optimalMode = getOptimalDisplayMode();
+          if (optimalMode !== 'smart') {
+            console.log(`🔍 Auto-selecting display mode: ${optimalMode} for ${result.summary.totalResources} resources`);
+            setExportSettings(function(prev) {
+              return { ...prev, displayMode: optimalMode };
+            });
+          }
+        }
+        
         console.log('✅ Export preview loaded:', result.summary);
         
       } else {
@@ -270,7 +272,7 @@ export function ExportPreview() {
     } else {
       console.log('🔍 DEBUG: No user ID, skipping load');
     }
-  }, [Meteor.userId(), exportSettings.format, exportSettings.includeMetadata, exportSettings.resourceTypes]);
+  }, [Meteor.userId(), exportSettings.format, exportSettings.includeMetadata, exportSettings.resourceTypes, exportSettings.previewLimit]);
 
   // Update filename when format changes
   useEffect(function() {
@@ -295,6 +297,33 @@ export function ExportPreview() {
     const value = event.target.value;
     console.log('🔍 DEBUG: Resource type change:', value);
     handleSettingChange('resourceTypes', typeof value === 'string' ? value.split(',') : value);
+  };
+
+  // FIXED: Handle display limit change with performance warning
+  const handleDisplayLimitChange = function(newValue) {
+    if (newValue > 50000 && !performanceWarningShown) {
+      setPendingDisplayLimit(newValue);
+      setPerformanceDialogOpen(true);
+      return;
+    }
+    
+    handleSettingChange('displayLimit', newValue);
+  };
+
+  // Confirm performance warning
+  const confirmPerformanceChange = function() {
+    if (pendingDisplayLimit !== null) {
+      handleSettingChange('displayLimit', pendingDisplayLimit);
+      setPerformanceWarningShown(true);
+      setPerformanceDialogOpen(false);
+      setPendingDisplayLimit(null);
+    }
+  };
+
+  // Cancel performance warning
+  const cancelPerformanceChange = function() {
+    setPerformanceDialogOpen(false);
+    setPendingDisplayLimit(null);
   };
 
   // Handle download
@@ -384,254 +413,263 @@ export function ExportPreview() {
     }
   };
 
-  // FIXED: Completely rewritten useMemo to handle large datasets properly
-  const { displayData, actualDisplayedRows, debugInfo: displayDebugInfo } = React.useMemo(function() {
+  // FIXED: Generate display data based on mode and limits
+  const generateDisplayData = function() {
     if (!exportData) {
       return {
-        displayData: '// No export data available\n// Debug info below:\n' + 
-                    JSON.stringify(debugInfo, null, 2),
+        content: '// No export data available\n// Debug info below:\n' + 
+                JSON.stringify(debugInfo, null, 2),
         actualDisplayedRows: 0,
-        debugInfo: { message: 'No export data' }
+        isTruncated: false,
+        renderingInfo: { mode: 'debug', reason: 'No export data' }
       };
     }
     
     try {
-      console.log('🔍 MEMO: Processing display data with settings:', {
-        displayRows: exportSettings.displayRows,
-        format: exportSettings.format,
-        prettyPrint: exportSettings.prettyPrint
-      });
+      const totalResources = exportData.summary?.totalResources || 0;
+      const currentDisplayMode = exportSettings.displayMode === 'smart' ? getOptimalDisplayMode() : exportSettings.displayMode;
       
-      console.log('🔍 MEMO: Export data structure:', {
-        keys: Object.keys(exportData),
-        summaryTotalResources: exportData.summary?.totalResources,
-        bundleEntryLength: exportData.bundle?.entry?.length,
-        resourcesType: Array.isArray(exportData.resources) ? 'array' : typeof exportData.resources,
-        resourcesLength: Array.isArray(exportData.resources) ? exportData.resources.length : 
-                        exportData.resources ? Object.keys(exportData.resources).length : 0
-      });
-      
-      // FIXED: Determine the effective limit - use -1 for unlimited
-      const effectiveLimit = exportSettings.displayRows === -1 ? Infinity : exportSettings.displayRows;
-      console.log('🔍 MEMO: Effective limit:', effectiveLimit);
-      
-      let actualRows = 0;
-      let totalAvailableResources = 0;
-      let processedStructure = '';
-      let resultData = '';
-      
-      if (exportSettings.format === 'ndjson') {
-        // NDJSON format - each resource on its own line
-        const lines = [];
-        
-        if (exportData.bundle && exportData.bundle.entry) {
-          totalAvailableResources = exportData.bundle.entry.length;
-          processedStructure = 'bundle.entry';
-          console.log('🔍 MEMO: Processing bundle.entry with', totalAvailableResources, 'items, limit:', effectiveLimit);
-          
-          // FIXED: Process up to the effective limit (which could be Infinity)
-          const itemsToProcess = Math.min(exportData.bundle.entry.length, effectiveLimit);
-          for (let i = 0; i < itemsToProcess; i++) {
-            const entry = exportData.bundle.entry[i];
-            if (entry.resource) {
-              lines.push(JSON.stringify(entry.resource, null, 0));
-              actualRows++;
-            }
-          }
-        } else if (exportData.resources) {
-          processedStructure = 'resources';
-          
-          if (Array.isArray(exportData.resources)) {
-            totalAvailableResources = exportData.resources.length;
-            processedStructure = 'resources (array)';
-            console.log('🔍 MEMO: Resources is array with', totalAvailableResources, 'items, limit:', effectiveLimit);
-            
-            const itemsToProcess = Math.min(exportData.resources.length, effectiveLimit);
-            for (let i = 0; i < itemsToProcess; i++) {
-              lines.push(JSON.stringify(exportData.resources[i], null, 0));
-              actualRows++;
-            }
-          } else {
-            processedStructure = 'resources (object)';
-            console.log('🔍 MEMO: Resources is object with keys:', Object.keys(exportData.resources));
-            
-            // Count total first
-            for (const [resourceType, resourceArray] of Object.entries(exportData.resources)) {
-              if (Array.isArray(resourceArray)) {
-                totalAvailableResources += resourceArray.length;
-              }
-            }
-            
-            // Process with limit
-            for (const [resourceType, resourceArray] of Object.entries(exportData.resources)) {
-              if (Array.isArray(resourceArray)) {
-                console.log(`🔍 MEMO: Processing ${resourceType} with ${resourceArray.length} items (actualRows: ${actualRows}/${effectiveLimit})`);
-                const itemsToProcess = Math.min(resourceArray.length, effectiveLimit - actualRows);
-                for (let i = 0; i < itemsToProcess; i++) {
-                  lines.push(JSON.stringify(resourceArray[i], null, 0));
-                  actualRows++;
-                }
-                if (actualRows >= effectiveLimit) {
-                  console.log(`🔍 MEMO: Hit effectiveLimit at ${actualRows}, breaking`);
-                  break;
-                }
-              }
-            }
-          }
-        }
-        
-        // Add truncation message if we hit the limit
-        if (actualRows >= effectiveLimit && totalAvailableResources > effectiveLimit && effectiveLimit !== Infinity) {
-          lines.push(`// ... ${totalAvailableResources - actualRows} more resources (limited to ${effectiveLimit.toLocaleString()} for preview)`);
-        }
-        
-        resultData = lines.join('\n');
-        
-      } else {
-        // Regular JSON format
-        let dataToDisplay = { ...exportData };
-        processedStructure = 'json';
-        
-        if (exportData.bundle && exportData.bundle.entry) {
-          totalAvailableResources = exportData.bundle.entry.length;
-          processedStructure = 'json bundle.entry';
-          console.log('🔍 MEMO: JSON - Processing bundle.entry with', totalAvailableResources, 'items, limit:', effectiveLimit);
-          
-          if (exportData.bundle.entry.length > effectiveLimit && effectiveLimit !== Infinity) {
-            dataToDisplay.bundle = {
-              ...exportData.bundle,
-              entry: exportData.bundle.entry.slice(0, effectiveLimit)
-            };
-            dataToDisplay.truncated = true;
-            dataToDisplay.displayedResources = effectiveLimit;
-            dataToDisplay.totalResources = exportData.bundle.entry.length;
-            actualRows = effectiveLimit;
-          } else {
-            actualRows = exportData.bundle.entry.length;
-          }
-        } else if (exportData.resources) {
-          processedStructure = 'json resources';
-          
-          if (Array.isArray(exportData.resources)) {
-            totalAvailableResources = exportData.resources.length;
-            processedStructure = 'json resources (array)';
-            console.log('🔍 MEMO: JSON - Processing resources array with', totalAvailableResources, 'items');
-            
-            if (exportData.resources.length > effectiveLimit && effectiveLimit !== Infinity) {
-              dataToDisplay.resources = exportData.resources.slice(0, effectiveLimit);
-              dataToDisplay.truncated = true;
-              dataToDisplay.displayedResources = effectiveLimit;
-              dataToDisplay.totalResources = exportData.resources.length;
-              actualRows = effectiveLimit;
-            } else {
-              actualRows = exportData.resources.length;
-            }
-          } else {
-            // Handle object with resource types
-            processedStructure = 'json resources (object)';
-            console.log('🔍 MEMO: JSON - Processing resources object');
-            const truncatedResources = {};
-            let displayedResourceCount = 0;
-            
-            // Count total resources first
-            for (const [type, resources] of Object.entries(exportData.resources)) {
-              if (Array.isArray(resources)) {
-                totalAvailableResources += resources.length;
-              }
-            }
-            
-            console.log('🔍 MEMO: Total resource count:', totalAvailableResources, 'effectiveLimit:', effectiveLimit);
-            
-            if (totalAvailableResources > effectiveLimit && effectiveLimit !== Infinity) {
-              // Truncate across resource types
-              for (const [type, resources] of Object.entries(exportData.resources)) {
-                if (Array.isArray(resources) && displayedResourceCount < effectiveLimit) {
-                  const remainingSlots = effectiveLimit - displayedResourceCount;
-                  const slicedResources = resources.slice(0, remainingSlots);
-                  truncatedResources[type] = slicedResources;
-                  displayedResourceCount += slicedResources.length;
-                  console.log(`🔍 MEMO: Added ${slicedResources.length} ${type} resources (total now: ${displayedResourceCount})`);
-                } else if (displayedResourceCount < effectiveLimit) {
-                  truncatedResources[type] = resources;
-                  if (Array.isArray(resources)) {
-                    displayedResourceCount += resources.length;
-                  }
-                  console.log(`🔍 MEMO: Added all ${Array.isArray(resources) ? resources.length : 'non-array'} ${type} resources (total now: ${displayedResourceCount})`);
-                }
-                
-                if (displayedResourceCount >= effectiveLimit) {
-                  console.log(`🔍 MEMO: Hit effectiveLimit at ${displayedResourceCount}, breaking`);
-                  break;
-                }
-              }
-              
-              dataToDisplay.resources = truncatedResources;
-              dataToDisplay.truncated = true;
-              dataToDisplay.displayedResources = displayedResourceCount;
-              dataToDisplay.totalResources = totalAvailableResources;
-              actualRows = displayedResourceCount;
-            } else {
-              actualRows = totalAvailableResources;
-            }
-          }
-        }
-        
-        resultData = JSON.stringify(dataToDisplay, null, exportSettings.prettyPrint ? 2 : 0);
-      }
-      
-      const jsonLines = resultData.split('\n').length;
-      
-      console.log('🔍 MEMO: Final result:', {
-        actualRows,
-        totalAvailableResources,
-        jsonLines,
-        effectiveLimit,
-        wasLimited: actualRows < totalAvailableResources,
+      console.log('🔍 DISPLAY: Generating display data', {
+        totalResources,
+        displayMode: currentDisplayMode,
+        displayLimit: exportSettings.displayLimit,
         format: exportSettings.format
       });
       
+      // FIXED: Handle different display modes
+      if (currentDisplayMode === 'summary-only') {
+        return generateSummaryDisplay();
+      }
+      
+      // For other modes, generate the actual content
+      let allItems = [];
+      let actualDisplayedRows = 0;
+      let isTruncated = false;
+      
+      // Extract resources from export data
+      if (exportData.bundle && exportData.bundle.entry) {
+        allItems = exportData.bundle.entry.map(function(entry) { return entry.resource; });
+      } else if (exportData.resources) {
+        if (Array.isArray(exportData.resources)) {
+          allItems = exportData.resources;
+        } else {
+          // Handle object with resource types
+          for (const [type, resources] of Object.entries(exportData.resources)) {
+            if (Array.isArray(resources)) {
+              allItems = allItems.concat(resources);
+            }
+          }
+        }
+      }
+      
+      console.log('🔍 DISPLAY: Found', allItems.length, 'total items');
+      
+      // Apply display limit for ACE editor mode
+      let itemsToDisplay = allItems;
+      if (currentDisplayMode === 'ace-editor' && exportSettings.displayLimit < allItems.length) {
+        itemsToDisplay = allItems.slice(0, exportSettings.displayLimit);
+        isTruncated = true;
+        actualDisplayedRows = exportSettings.displayLimit;
+        console.log(`🔍 DISPLAY: Truncated to ${actualDisplayedRows} items for ACE editor`);
+      } else {
+        actualDisplayedRows = allItems.length;
+      }
+      
+      // Generate content string
+      let content = '';
+      
+      if (exportSettings.format === 'ndjson') {
+        const lines = itemsToDisplay.map(function(item) {
+          return JSON.stringify(item, null, 0);
+        });
+        
+        if (isTruncated) {
+          lines.push(`// ... ${allItems.length - actualDisplayedRows} more resources (limited to ${exportSettings.displayLimit.toLocaleString()} for editor preview)`);
+        }
+        
+        content = lines.join('\n');
+      } else {
+        let dataToDisplay = {};
+        
+        if (exportSettings.format === 'bundle') {
+          dataToDisplay = {
+            resourceType: 'Bundle',
+            type: 'collection',
+            total: actualDisplayedRows,
+            entry: itemsToDisplay.map(function(item) {
+              return {
+                resource: item
+              };
+            })
+          };
+          
+          if (isTruncated) {
+            dataToDisplay.truncated = true;
+            dataToDisplay.displayInfo = {
+              shown: actualDisplayedRows,
+              total: allItems.length,
+              reason: 'Limited for editor performance'
+            };
+          }
+        } else {
+          dataToDisplay = {
+            format: 'individual',
+            resources: itemsToDisplay,
+            metadata: exportSettings.includeMetadata ? {
+              resourceCount: actualDisplayedRows,
+              totalAvailable: allItems.length,
+              truncated: isTruncated
+            } : null
+          };
+        }
+        
+        content = JSON.stringify(dataToDisplay, null, exportSettings.prettyPrint ? 2 : 0);
+      }
+      
       return {
-        displayData: resultData,
-        actualDisplayedRows: actualRows,
-        debugInfo: {
+        content: content,
+        actualDisplayedRows: actualDisplayedRows,
+        totalAvailable: allItems.length,
+        isTruncated: isTruncated,
+        renderingInfo: {
+          mode: currentDisplayMode,
           format: exportSettings.format,
-          structure: processedStructure,
-          actualRows,
-          totalAvailableResources,
-          jsonLines,
-          effectiveLimit,
-          limitReached: actualRows >= effectiveLimit && effectiveLimit !== Infinity,
-          prettyPrint: exportSettings.prettyPrint
+          contentLength: content.length,
+          lines: content.split('\n').length
         }
       };
+      
     } catch (error) {
-      console.error('🔍 MEMO: Error in useMemo:', error);
+      console.error('🔍 DISPLAY: Error generating display data:', error);
       return {
-        displayData: `Error formatting data: ${error.message}\n\nDebug info:\n${JSON.stringify(debugInfo, null, 2)}`,
+        content: `Error generating display: ${error.message}\n\nDebug info:\n${JSON.stringify(debugInfo, null, 2)}`,
         actualDisplayedRows: 0,
-        debugInfo: { error: error.message }
+        isTruncated: false,
+        renderingInfo: { mode: 'error', error: error.message }
       };
     }
-  }, [exportData, exportSettings.displayRows, exportSettings.format, exportSettings.prettyPrint, debugInfo]);
-
-  // Get display data
-  const getDisplayData = function() {
-    return displayData;
   };
+
+  // Generate summary-only display
+  const generateSummaryDisplay = function() {
+    const summary = exportData.summary || {};
+    const resourceCounts = summary.resourceCounts || {};
+    
+    const summaryContent = {
+      exportSummary: {
+        totalResources: summary.totalResources || 0,
+        totalAvailableInDb: summary.totalAvailableInDb || 0,
+        format: summary.format || 'unknown',
+        generatedAt: summary.generatedAt,
+        previewMode: true,
+        resourceBreakdown: resourceCounts
+      },
+      note: 'This is a summary view. Use a different display mode to see the actual data.',
+      displayModeInfo: 'Summary mode is recommended for datasets with more than 100,000 resources to prevent browser performance issues.',
+      downloadNote: 'The full download will include all data regardless of display mode.'
+    };
+    
+    return {
+      content: JSON.stringify(summaryContent, null, 2),
+      actualDisplayedRows: summary.totalResources || 0,
+      totalAvailable: summary.totalResources || 0,
+      isTruncated: false,
+      renderingInfo: {
+        mode: 'summary-only',
+        reason: 'Large dataset - showing summary only'
+      }
+    };
+  };
+
+  const displayData = generateDisplayData();
 
   // Get file size estimate
   const getFileSizeEstimate = function() {
-    const data = getDisplayData();
-    const sizeInBytes = new Blob([data]).size;
+    const sizeInBytes = new Blob([displayData.content]).size;
     
     if (sizeInBytes < 1024) return `${sizeInBytes} bytes`;
     if (sizeInBytes < 1024 * 1024) return `${(sizeInBytes / 1024).toFixed(1)} KB`;
     return `${(sizeInBytes / (1024 * 1024)).toFixed(1)} MB`;
   };
 
-  // Get displayed resource count
-  const getDisplayedResourceCount = function() {
-    return actualDisplayedRows;
+  // FIXED: Render content based on display mode
+  const renderContent = function() {
+    const currentDisplayMode = exportSettings.displayMode === 'smart' ? getOptimalDisplayMode() : exportSettings.displayMode;
+    
+    if (loading) {
+      return (
+        <Box sx={{ p: 3 }}>
+          <LinearProgress sx={{ mb: 2 }} />
+          <Typography variant="body2" color="text.secondary" align="center">
+            Loading export preview...
+          </Typography>
+        </Box>
+      );
+    }
+    
+    if (!exportData) {
+      return (
+        <Box sx={{ p: 3, textAlign: 'center' }}>
+          <WarningIcon sx={{ fontSize: 64, color: 'text.secondary', mb: 2 }} />
+          <Typography variant="h6" gutterBottom>
+            No Export Data
+          </Typography>
+          <Typography variant="body2" color="text.secondary">
+            No data available for export with the current filters.
+          </Typography>
+        </Box>
+      );
+    }
+    
+    if (currentDisplayMode === 'ace-editor') {
+      return (
+        <AceEditor
+          mode="json"
+          theme={exportSettings.theme}
+          name="export-preview-editor"
+          editorProps={{ $blockScrolling: true }}
+          fontSize={exportSettings.fontSize}
+          showPrintMargin={true}
+          showGutter={true}
+          highlightActiveLine={true}
+          value={displayData.content}
+          readOnly={true}
+          width="100%"
+          height="100%"
+          wrapEnabled={exportSettings.wordWrap}
+          setOptions={{
+            enableBasicAutocompletion: false,
+            enableLiveAutocompletion: false,
+            enableSnippets: false,
+            showLineNumbers: true,
+            tabSize: 2,
+            useWorker: false,
+            scrollPastEnd: false,
+            fixedWidthGutter: false
+          }}
+          style={{
+            width: '100%',
+            height: '100%',
+            fontFamily: 'Monaco, Menlo, "Ubuntu Mono", monospace'
+          }}
+        />
+      );
+    } else {
+      // Simple text display for large datasets
+      return (
+        <Box sx={{ height: '100%', overflow: 'auto', p: 2, bgcolor: 'grey.50' }}>
+          <pre style={{
+            fontFamily: 'Monaco, Menlo, "Ubuntu Mono", monospace',
+            fontSize: `${exportSettings.fontSize}px`,
+            margin: 0,
+            whiteSpace: exportSettings.wordWrap ? 'pre-wrap' : 'pre',
+            wordBreak: exportSettings.wordWrap ? 'break-word' : 'normal'
+          }}>
+            {displayData.content}
+          </pre>
+        </Box>
+      );
+    }
   };
 
   if (!Meteor.userId()) {
@@ -643,6 +681,8 @@ export function ExportPreview() {
       </Container>
     );
   }
+
+  const currentDisplayMode = exportSettings.displayMode === 'smart' ? getOptimalDisplayMode() : exportSettings.displayMode;
 
   return (
     <Container maxWidth="xl" sx={{ mt: 4, mb: 4 }}>
@@ -730,27 +770,21 @@ export function ExportPreview() {
                 </Select>
               </FormControl>
 
-              {/* FIXED: Preview Rows Selector with much higher limits */}
+              {/* FIXED: Display Mode Selection */}
               <FormControl fullWidth sx={{ mb: 2 }}>
-                <InputLabel>Preview Rows</InputLabel>
+                <InputLabel>Display Mode</InputLabel>
                 <Select
-                  value={exportSettings.displayRows}
-                  label="Preview Rows"
-                  onChange={function(e) { 
-                    console.log('🔍 DEBUG: Preview rows changed to:', e.target.value);
-                    handleDisplayRowsChange(e.target.value); 
-                  }}
+                  value={exportSettings.displayMode}
+                  label="Display Mode"
+                  onChange={function(e) { handleSettingChange('displayMode', e.target.value); }}
                 >
-                  {getDisplayRowsOptions().map(function(option) {
+                  {getDisplayModeOptions().map(function(option) {
                     return (
-                      <MenuItem key={option.value} value={option.value}>
+                      <MenuItem key={option.mode} value={option.mode}>
                         <Box display="flex" alignItems="center" justifyContent="space-between" width="100%">
                           <span>{option.label}</span>
-                          {option.performance === 'slow' && (
-                            <SpeedIcon sx={{ fontSize: 16, color: 'warning.main', ml: 1 }} />
-                          )}
-                          {(option.performance === 'very-slow' || option.performance === 'extremely-slow') && (
-                            <WarningIcon sx={{ fontSize: 16, color: 'error.main', ml: 1 }} />
+                          {option.recommended && (
+                            <CheckIcon sx={{ fontSize: 16, color: 'success.main', ml: 1 }} />
                           )}
                         </Box>
                       </MenuItem>
@@ -759,30 +793,67 @@ export function ExportPreview() {
                 </Select>
               </FormControl>
 
+              {/* FIXED: Display Limit (only for ACE editor mode) */}
+              {currentDisplayMode === 'ace-editor' && (
+                <FormControl fullWidth sx={{ mb: 2 }}>
+                  <InputLabel>Editor Display Limit</InputLabel>
+                  <Select
+                    value={exportSettings.displayLimit}
+                    label="Editor Display Limit"
+                    onChange={function(e) { handleDisplayLimitChange(e.target.value); }}
+                  >
+                    <MenuItem value={1000}>1,000 resources</MenuItem>
+                    <MenuItem value={5000}>5,000 resources</MenuItem>
+                    <MenuItem value={10000}>10,000 resources</MenuItem>
+                    <MenuItem value={25000}>25,000 resources</MenuItem>
+                    <MenuItem value={50000}>50,000 resources</MenuItem>
+                    <MenuItem value={100000}>100,000 resources</MenuItem>
+                  </Select>
+                </FormControl>
+              )}
+
+              {/* FIXED: Preview Server Limit */}
+              <FormControl fullWidth sx={{ mb: 2 }}>
+                <InputLabel>Preview Server Limit</InputLabel>
+                <Select
+                  value={exportSettings.previewLimit}
+                  label="Preview Server Limit"
+                  onChange={function(e) { handleSettingChange('previewLimit', e.target.value); }}
+                >
+                  <MenuItem value={10000}>10,000 resources</MenuItem>
+                  <MenuItem value={50000}>50,000 resources</MenuItem>
+                  <MenuItem value={100000}>100,000 resources</MenuItem>
+                  <MenuItem value={500000}>500,000 resources</MenuItem>
+                  <MenuItem value={1000000}>1,000,000 resources</MenuItem>
+                </Select>
+              </FormControl>
+
               {/* Show performance warning for current selection */}
-              {exportSettings.displayRows > 10000 && (
+              {currentDisplayMode === 'ace-editor' && exportSettings.displayLimit > 25000 && (
                 <Alert severity="warning" sx={{ mb: 2, fontSize: '0.75rem' }}>
                   <Typography variant="caption">
-                    {getPerformanceInfo(exportSettings.displayRows).warning}
+                    Large display limit may slow down the code editor
                   </Typography>
                 </Alert>
               )}
 
-              {/* Editor Theme */}
-              <FormControl fullWidth sx={{ mb: 2 }}>
-                <InputLabel>Editor Theme</InputLabel>
-                <Select
-                  value={exportSettings.theme}
-                  label="Editor Theme"
-                  onChange={function(e) { handleSettingChange('theme', e.target.value); }}
-                >
-                  <MenuItem value="github">GitHub Light</MenuItem>
-                  <MenuItem value="monokai">Monokai Dark</MenuItem>
-                  <MenuItem value="tomorrow">Tomorrow</MenuItem>
-                  <MenuItem value="solarized_light">Solarized Light</MenuItem>
-                  <MenuItem value="solarized_dark">Solarized Dark</MenuItem>
-                </Select>
-              </FormControl>
+              {/* Editor Theme (only for ACE mode) */}
+              {currentDisplayMode === 'ace-editor' && (
+                <FormControl fullWidth sx={{ mb: 2 }}>
+                  <InputLabel>Editor Theme</InputLabel>
+                  <Select
+                    value={exportSettings.theme}
+                    label="Editor Theme"
+                    onChange={function(e) { handleSettingChange('theme', e.target.value); }}
+                  >
+                    <MenuItem value="github">GitHub Light</MenuItem>
+                    <MenuItem value="monokai">Monokai Dark</MenuItem>
+                    <MenuItem value="tomorrow">Tomorrow</MenuItem>
+                    <MenuItem value="solarized_light">Solarized Light</MenuItem>
+                    <MenuItem value="solarized_dark">Solarized Dark</MenuItem>
+                  </Select>
+                </FormControl>
+              )}
 
               {/* Font Size */}
               <TextField
@@ -878,7 +949,7 @@ export function ExportPreview() {
                     </ListItemIcon>
                     <ListItemText
                       primary="Showing Resources"
-                      secondary={`${getDisplayedResourceCount().toLocaleString()} of ${get(exportData, 'summary.totalResources', 0).toLocaleString()}`}
+                      secondary={`${displayData.actualDisplayedRows.toLocaleString()} of ${get(exportData, 'summary.totalResources', 0).toLocaleString()}`}
                     />
                   </ListItem>
                   
@@ -894,11 +965,11 @@ export function ExportPreview() {
                   
                   <ListItem>
                     <ListItemIcon>
-                      <CodeIcon color="secondary" />
+                      <ViewModuleIcon color="secondary" />
                     </ListItemIcon>
                     <ListItemText
-                      primary="Format"
-                      secondary={exportSettings.format.toUpperCase()}
+                      primary="Display Mode"
+                      secondary={currentDisplayMode.replace('-', ' ').replace(/\b\w/g, l => l.toUpperCase())}
                     />
                   </ListItem>
                 </List>
@@ -921,22 +992,21 @@ export function ExportPreview() {
                   </Box>
                 )}
 
-                {/* Enhanced debug info showing processing details */}
+                {/* Enhanced debug info */}
                 <Box sx={{ mt: 2, p: 1, bgcolor: 'grey.100', borderRadius: 1 }}>
                   <Typography variant="caption" component="div">
-                    <strong>Debug:</strong> displayRows={exportSettings.displayRows === -1 ? 'All' : exportSettings.displayRows.toLocaleString()}, actualDisplayedRows={actualDisplayedRows.toLocaleString()}
+                    <strong>Mode:</strong> {currentDisplayMode}, 
+                    <strong> Format:</strong> {exportSettings.format}
                   </Typography>
-                  {displayDebugInfo && (
-                    <Typography variant="caption" component="div" sx={{ mt: 0.5 }}>
-                      <strong>Structure:</strong> {displayDebugInfo.structure}, 
-                      <strong> Available:</strong> {displayDebugInfo.totalAvailableResources?.toLocaleString()}, 
-                      <strong> Format:</strong> {displayDebugInfo.format}
-                      {displayDebugInfo.jsonLines && (
-                        <span>, <strong>JSON Lines:</strong> {displayDebugInfo.jsonLines.toLocaleString()}</span>
-                      )}
-                      {displayDebugInfo.effectiveLimit !== undefined && (
-                        <span>, <strong>Limit:</strong> {displayDebugInfo.effectiveLimit === Infinity ? 'None' : displayDebugInfo.effectiveLimit.toLocaleString()}</span>
-                      )}
+                  <Typography variant="caption" component="div" sx={{ mt: 0.5 }}>
+                    <strong>Server Limit:</strong> {exportSettings.previewLimit.toLocaleString()}, 
+                    {currentDisplayMode === 'ace-editor' && (
+                      <span><strong> Editor Limit:</strong> {exportSettings.displayLimit.toLocaleString()}</span>
+                    )}
+                  </Typography>
+                  {displayData.isTruncated && (
+                    <Typography variant="caption" component="div" sx={{ mt: 0.5, color: 'warning.main' }}>
+                      <strong>Truncated:</strong> Display limited for performance
                     </Typography>
                   )}
                 </Box>
@@ -961,80 +1031,29 @@ export function ExportPreview() {
                   {exportData && (
                     <Box display="flex" alignItems="center" gap={1}>
                       <Chip
-                        label={`${getDisplayedResourceCount().toLocaleString()} of ${get(exportData, 'summary.totalResources', 0).toLocaleString()} resources`}
+                        label={`${displayData.actualDisplayedRows.toLocaleString()} of ${get(exportData, 'summary.totalResources', 0).toLocaleString()} resources`}
                         color="primary"
                         size="small"
                       />
-                      {exportSettings.displayRows !== -1 && exportSettings.displayRows < get(exportData, 'summary.totalResources', 0) && (
+                      {displayData.isTruncated && (
                         <Chip
-                          label={`Preview Limited`}
+                          label="Preview Limited"
                           color="warning"
                           size="small"
                         />
                       )}
-                      {exportSettings.displayRows > 50000 && (
-                        <Chip
-                          label="Large Dataset"
-                          color="error"
-                          size="small"
-                          icon={<WarningIcon />}
-                        />
-                      )}
+                      <Chip
+                        label={currentDisplayMode.replace('-', ' ').replace(/\b\w/g, l => l.toUpperCase())}
+                        color="secondary"
+                        size="small"
+                      />
                     </Box>
                   )}
                 </Box>
               </Box>
 
               <Box sx={{ flexGrow: 1, position: 'relative' }}>
-                {loading ? (
-                  <Box sx={{ p: 3 }}>
-                    <LinearProgress sx={{ mb: 2 }} />
-                    <Typography variant="body2" color="text.secondary" align="center">
-                      Loading export preview...
-                    </Typography>
-                  </Box>
-                ) : exportData ? (
-                  <AceEditor
-                    mode="json"
-                    theme={exportSettings.theme}
-                    name="export-preview-editor"
-                    editorProps={{ $blockScrolling: true }}
-                    fontSize={exportSettings.fontSize}
-                    showPrintMargin={true}
-                    showGutter={true}
-                    highlightActiveLine={true}
-                    value={getDisplayData()}
-                    readOnly={true}
-                    width="100%"
-                    height="100%"
-                    wrapEnabled={exportSettings.wordWrap}
-                    setOptions={{
-                      enableBasicAutocompletion: false,
-                      enableLiveAutocompletion: false,
-                      enableSnippets: false,
-                      showLineNumbers: true,
-                      tabSize: 2,
-                      useWorker: false,
-                      scrollPastEnd: false,
-                      fixedWidthGutter: false
-                    }}
-                    style={{
-                      width: '100%',
-                      height: '100%',
-                      fontFamily: 'Monaco, Menlo, "Ubuntu Mono", monospace'
-                    }}
-                  />
-                ) : (
-                  <Box sx={{ p: 3, textAlign: 'center' }}>
-                    <WarningIcon sx={{ fontSize: 64, color: 'text.secondary', mb: 2 }} />
-                    <Typography variant="h6" gutterBottom>
-                      No Export Data
-                    </Typography>
-                    <Typography variant="body2" color="text.secondary">
-                      No data available for export with the current filters.
-                    </Typography>
-                  </Box>
-                )}
+                {renderContent()}
               </Box>
             </CardContent>
           </Card>
@@ -1057,7 +1076,7 @@ export function ExportPreview() {
         <DialogContent>
           <Box sx={{ mb: 2 }}>
             <Typography variant="body1" paragraph>
-              You've selected to display <strong>{pendingDisplayRows === -1 ? 'all rows' : pendingDisplayRows?.toLocaleString()}</strong> which may cause:
+              You've selected to display <strong>{pendingDisplayLimit?.toLocaleString()}</strong> resources in the code editor, which may cause:
             </Typography>
             
             <Box component="ul" sx={{ pl: 2, mb: 2 }}>
@@ -1067,26 +1086,21 @@ export function ExportPreview() {
               <Typography component="li" variant="body2" sx={{ mb: 0.5 }}>
                 High memory usage (especially on mobile devices)
               </Typography>
-              {pendingDisplayRows >= 100000 && (
-                <Typography component="li" variant="body2" sx={{ mb: 0.5 }}>
-                  <strong>Browser may freeze</strong> for 10+ seconds during rendering
-                </Typography>
-              )}
-              {pendingDisplayRows >= 500000 && (
+              {pendingDisplayLimit >= 100000 && (
                 <Typography component="li" variant="body2" sx={{ mb: 0.5, color: 'error.main' }}>
-                  <strong>Very high risk</strong> of browser crash on older devices
+                  <strong>Browser may freeze</strong> for 10+ seconds during rendering
                 </Typography>
               )}
             </Box>
 
-            <Alert severity={pendingDisplayRows >= 100000 ? "error" : "warning"} sx={{ mb: 2 }}>
+            <Alert severity="warning" sx={{ mb: 2 }}>
               <Typography variant="body2">
-                {getPerformanceInfo(pendingDisplayRows).warning}
+                Consider using "Simple Text" display mode for better performance with large datasets.
               </Typography>
             </Alert>
 
             <Typography variant="body2" color="text.secondary">
-              Consider using a smaller preview size for better performance. The full download will always include all your data regardless of preview settings.
+              The full download will always include all your data regardless of display settings.
             </Typography>
           </Box>
         </DialogContent>
@@ -1096,7 +1110,7 @@ export function ExportPreview() {
           </Button>
           <Button 
             onClick={confirmPerformanceChange}
-            color={pendingDisplayRows >= 100000 ? "error" : "warning"}
+            color="warning"
             variant="contained"
           >
             Continue Anyway
