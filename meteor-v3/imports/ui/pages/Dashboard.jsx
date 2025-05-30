@@ -37,6 +37,7 @@ import {
   Communications, 
   ClinicalImpressions, 
   Media, 
+  Persons,
   ImportJobs 
 } from '../../api/fhir/collections';
 
@@ -64,35 +65,38 @@ function Dashboard() {
     const communicationsHandle = Meteor.subscribe('user.communications', 50);
     const clinicalHandle = Meteor.subscribe('user.clinicalImpressions', 50);
     const mediaHandle = Meteor.subscribe('user.media', 20);
+    const personsHandle = Meteor.subscribe('user.persons', 50); // FIXED: Add persons subscription
     const importsHandle = Meteor.subscribe('user.imports');
 
     const isLoading = !patientsHandle.ready() || 
                     !communicationsHandle.ready() || 
                     !clinicalHandle.ready() ||
                     !mediaHandle.ready() ||
+                    !personsHandle.ready() ||
                     !importsHandle.ready();
 
     if (isLoading) return { isLoading: true };
 
-    // FIXED: Get statistics using reactive methods instead of async
-    // This data comes from publications/subscriptions and is reactive
-    const allCommunications = Communications.find({ userId }).fetch();
-    const allClinicalImpressions = ClinicalImpressions.find({ userId }).fetch();
-    const allMedia = Media.find({ userId }).fetch();
+    // FIXED: Get statistics for corrected FHIR mappings
+    const allCommunications = Communications.find({ userId }).fetch(); // Messages -> Communications
+    const allClinicalImpressions = ClinicalImpressions.find({ userId }).fetch(); // Posts -> ClinicalImpressions
+    const allMedia = Media.find({ userId }).fetch(); // Photos -> Media
+    const allPersons = Persons.find({ userId }).fetch(); // FIXED: Friends -> Persons
     const allImports = ImportJobs.find({ userId, status: 'completed' }).fetch();
 
     const stats = {
       totalCommunications: allCommunications.length,
       totalClinicalImpressions: allClinicalImpressions.length,
       totalMedia: allMedia.length,
-      totalImports: allImports.length
+      totalPersons: allPersons.length // FIXED: Changed from imports to persons
     };
 
-    // FIXED: Debug logging to see what data we have
-    console.log('📊 Dashboard stats:', stats);
-    console.log('📊 Sample communications:', allCommunications.slice(0, 2));
-    console.log('📊 Sample clinical impressions:', allClinicalImpressions.slice(0, 2));
-    console.log('📊 Sample media:', allMedia.slice(0, 2));
+    // Debug logging with corrected mappings
+    console.log('📊 Dashboard stats (corrected FHIR mappings):', stats);
+    console.log('💬 Communications (from messages):', allCommunications.slice(0, 2));
+    console.log('🏥 Clinical Impressions (from posts):', allClinicalImpressions.slice(0, 2));
+    console.log('📸 Media (from photos):', allMedia.slice(0, 2));
+    console.log('👥 Persons (from friends):', allPersons.slice(0, 2));
 
     // Get recent data for display
     const recentClinicalImpressions = ClinicalImpressions.find(
@@ -165,7 +169,7 @@ function Dashboard() {
     );
   }
 
-  const hasData = stats.totalCommunications > 0 || stats.totalClinicalImpressions > 0 || stats.totalMedia > 0;
+  const hasData = stats.totalCommunications > 0 || stats.totalClinicalImpressions > 0 || stats.totalMedia > 0 || stats.totalPersons > 0;
 
   return (
     <Container maxWidth="xl" sx={{ mt: 4, mb: 4 }}>
@@ -175,15 +179,18 @@ function Dashboard() {
           Personal Health Timeline
         </Typography>
         <Typography variant="subtitle1" color="text.secondary">
-          Welcome back! Here's your health data overview.
+          Welcome back! Here's your health data overview with correct FHIR mappings.
         </Typography>
       </Box>
 
-      {/* FIXED: Add debug info card in development */}
+      {/* FIXED: Add debug info card with corrected mappings */}
       {Meteor.isDevelopment && (
         <Alert severity="info" sx={{ mb: 3 }}>
           <Typography variant="body2">
-            Debug: Communications: {stats.totalCommunications}, Clinical: {stats.totalClinicalImpressions}, Media: {stats.totalMedia}
+            <strong>Corrected FHIR Mappings:</strong> Communications: {stats.totalCommunications} (from messages), 
+            Clinical Impressions: {stats.totalClinicalImpressions} (from posts), 
+            Media: {stats.totalMedia} (from photos), 
+            Persons: {stats.totalPersons} (from friends)
           </Typography>
         </Alert>
       )}
@@ -197,7 +204,7 @@ function Dashboard() {
         </Alert>
       )}
 
-      {/* Statistics Cards */}
+      {/* FIXED: Statistics Cards with Corrected FHIR Mappings */}
       <Grid container spacing={3} sx={{ mb: 4 }}>
         <Grid item xs={12} sm={6} md={3}>
           <StatCard
@@ -205,16 +212,16 @@ function Dashboard() {
             value={stats.totalCommunications}
             icon={<MessageIcon />}
             color="primary"
-            description="Social media posts"
+            description="From Facebook messages"
           />
         </Grid>
         <Grid item xs={12} sm={6} md={3}>
           <StatCard
-            title="Health Records"
+            title="Clinical Records"
             value={stats.totalClinicalImpressions}
             icon={<HealthIcon />}
             color="error"
-            description="Clinical impressions"
+            description="From Facebook posts"
           />
         </Grid>
         <Grid item xs={12} sm={6} md={3}>
@@ -223,16 +230,16 @@ function Dashboard() {
             value={stats.totalMedia}
             icon={<PhotoIcon />}
             color="warning"
-            description="Photos and videos"
+            description="From Facebook photos"
           />
         </Grid>
         <Grid item xs={12} sm={6} md={3}>
           <StatCard
-            title="Imports"
-            value={stats.totalImports}
+            title="Persons"
+            value={stats.totalPersons}
             icon={<PersonIcon />}
             color="success"
-            description="Completed imports"
+            description="From Facebook friends"
           />
         </Grid>
       </Grid>
@@ -272,6 +279,11 @@ function Dashboard() {
                     View All
                   </Button>
                 </Box>
+                <Alert severity="info" sx={{ mb: 2 }}>
+                  <Typography variant="body2">
+                    <strong>Note:</strong> Health Records come from Facebook posts, Communications from messages
+                  </Typography>
+                </Alert>
                 <RecentActivity
                   clinicalImpressions={recentClinicalImpressions}
                   communications={recentCommunications}
@@ -289,6 +301,10 @@ function Dashboard() {
                 </Typography>
                 <Typography variant="body1" color="text.secondary" paragraph>
                   Get started by importing your Facebook data to create your personal health timeline.
+                </Typography>
+                <Typography variant="body2" color="text.secondary" paragraph>
+                  <strong>FHIR Mappings:</strong> Posts → Clinical Records, Messages → Communications, 
+                  Photos → Media, Friends → Persons
                 </Typography>
                 <Button
                   variant="contained"
@@ -345,9 +361,10 @@ function Dashboard() {
                         </Typography>
                         {importJob.results && (
                           <Typography variant="caption" display="block" color="text.secondary">
-                            {get(importJob.results, 'communications', 0)} posts, {' '}
-                            {get(importJob.results, 'clinicalImpressions', 0)} health records, {' '}
-                            {get(importJob.results, 'media', 0)} media files
+                            {get(importJob.results, 'communications', 0)} messages, {' '}
+                            {get(importJob.results, 'clinicalImpressions', 0)} posts, {' '}
+                            {get(importJob.results, 'media', 0)} photos, {' '}
+                            {get(importJob.results, 'persons', 0)} friends
                           </Typography>
                         )}
                       </Box>

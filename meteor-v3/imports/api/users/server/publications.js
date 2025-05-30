@@ -6,6 +6,8 @@ import {
   Communications, 
   ClinicalImpressions, 
   Media, 
+  Persons,
+  CareTeams,
   ImportJobs 
 } from '../../fhir/collections';
 
@@ -152,6 +154,78 @@ Meteor.publish('user.media.recent', function() {
   );
 });
 
+// FIXED: Add Persons publications (from Facebook friends)
+Meteor.publish('user.persons', function(limit = null) {
+  if (limit !== null) {
+    check(limit, Number);
+  }
+  
+  if (!this.userId) {
+    return this.ready();
+  }
+
+  const options = { 
+    sort: { createdAt: -1 }
+  };
+  
+  if (limit !== null && limit > 0) {
+    options.limit = Math.min(limit, 1000);
+  }
+
+  return Persons.find({ userId: this.userId }, options);
+});
+
+Meteor.publish('user.persons.all', function() {
+  if (!this.userId) {
+    return this.ready();
+  }
+
+  return Persons.find({ userId: this.userId });
+});
+
+Meteor.publish('user.persons.recent', function() {
+  if (!this.userId) {
+    return this.ready();
+  }
+
+  return Persons.find(
+    { userId: this.userId },
+    { 
+      sort: { createdAt: -1 },
+      limit: 10
+    }
+  );
+});
+
+// Add CareTeams publications
+Meteor.publish('user.careTeams', function(limit = null) {
+  if (limit !== null) {
+    check(limit, Number);
+  }
+  
+  if (!this.userId) {
+    return this.ready();
+  }
+
+  const options = { 
+    sort: { createdAt: -1 }
+  };
+  
+  if (limit !== null && limit > 0) {
+    options.limit = Math.min(limit, 100);
+  }
+
+  return CareTeams.find({ userId: this.userId }, options);
+});
+
+Meteor.publish('user.careTeams.all', function() {
+  if (!this.userId) {
+    return this.ready();
+  }
+
+  return CareTeams.find({ userId: this.userId });
+});
+
 Meteor.publish('user.imports', function() {
   if (!this.userId) {
     return this.ready();
@@ -194,7 +268,7 @@ Meteor.publish('import.job', function(jobId) {
   });
 });
 
-// FIXED: Add publications for accurate counting
+// FIXED: Add publications for accurate counting including Persons
 Meteor.publish('user.counts', function() {
   if (!this.userId) {
     return this.ready();
@@ -206,6 +280,8 @@ Meteor.publish('user.counts', function() {
     Patients.find({ userId: this.userId }),
     Communications.find({ userId: this.userId }),
     ClinicalImpressions.find({ userId: this.userId }),
-    Media.find({ userId: this.userId })
+    Media.find({ userId: this.userId }),
+    Persons.find({ userId: this.userId }),
+    CareTeams.find({ userId: this.userId })
   ];
 });
