@@ -47,10 +47,10 @@ import {
   DateRange as DateIcon,
   Search as SearchIcon,
   Download as DownloadIcon,
-  Refresh as RefreshIcon
+  Refresh as RefreshIcon,
+  Clear as ClearIcon
 } from '@mui/icons-material';
 
-import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import { 
   Communications, 
   ClinicalImpressions, 
@@ -68,7 +68,9 @@ export function Timeline() {
   const [error, setError] = useState(null);
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
+  const [totalCount, setTotalCount] = useState(0);
   const [expandedItems, setExpandedItems] = useState(new Set());
+  const [itemsPerPage, setItemsPerPage] = useState(25);
   
   // Filter state
   const [filters, setFilters] = useState({
@@ -82,8 +84,6 @@ export function Timeline() {
     sortOrder: 'desc' // 'asc', 'desc'
   });
 
-  const itemsPerPage = 25;
-
   // Load timeline data from server
   const loadTimelineData = async function(pageNumber = 1) {
     setLoading(true);
@@ -91,6 +91,8 @@ export function Timeline() {
     
     try {
       console.log('📊 Loading timeline data for page:', pageNumber);
+      console.log('📊 Filters:', filters);
+      console.log('📊 Items per page:', itemsPerPage);
       
       const result = await new Promise(function(resolve, reject) {
         Meteor.call('timeline.getData', {
@@ -104,6 +106,7 @@ export function Timeline() {
       });
       
       setTimelineData(result.items || []);
+      setTotalCount(result.totalCount || 0);
       setTotalPages(Math.ceil((result.totalCount || 0) / itemsPerPage));
       console.log('✅ Timeline data loaded:', result);
       
@@ -148,7 +151,7 @@ export function Timeline() {
       loadTimelineData(1);
       setPage(1);
     }
-  }, [filters.resourceType, filters.sortBy, filters.sortOrder]);
+  }, [filters.resourceType, filters.sortBy, filters.sortOrder, itemsPerPage]);
 
   // Handle search with debounce
   useEffect(function() {
@@ -162,24 +165,37 @@ export function Timeline() {
     return function() { clearTimeout(timeoutId); };
   }, [filters.searchQuery]);
 
-  // DISABLED: Date range handling
-  // useEffect(function() {
-  //   if (filters.dateRange.start || filters.dateRange.end) {
-  //     if (Meteor.userId()) {
-  //       loadTimelineData(1);
-  //       setPage(1);
-  //     }
-  //   }
-  // }, [filters.dateRange.start, filters.dateRange.end]);
+  // Handle date range changes with debounce
+  useEffect(function() {
+    const timeoutId = setTimeout(function() {
+      if (Meteor.userId() && (filters.dateRange.start || filters.dateRange.end)) {
+        loadTimelineData(1);
+        setPage(1);
+      }
+    }, 1000); // Longer debounce for date changes
+
+    return function() { clearTimeout(timeoutId); };
+  }, [filters.dateRange.start, filters.dateRange.end]);
 
   // Handle pagination
   const handlePageChange = function(event, newPage) {
     setPage(newPage);
     loadTimelineData(newPage);
+    // Scroll to top of timeline
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  // Handle items per page change
+  const handleItemsPerPageChange = function(event) {
+    const newItemsPerPage = event.target.value;
+    setItemsPerPage(newItemsPerPage);
+    setPage(1); // Reset to first page
+    console.log('📊 Items per page changed to:', newItemsPerPage);
   };
 
   // Handle filter changes
   const handleFilterChange = function(filterKey, value) {
+    console.log('📊 Filter change:', filterKey, value);
     setFilters(function(prev) {
       return {
         ...prev,
@@ -190,6 +206,7 @@ export function Timeline() {
 
   // Handle nested filter changes (like dateRange)
   const handleNestedFilterChange = function(parentKey, childKey, value) {
+    console.log('📊 Nested filter change:', parentKey, childKey, value);
     setFilters(function(prev) {
       return {
         ...prev,
@@ -199,6 +216,15 @@ export function Timeline() {
         }
       };
     });
+  };
+
+  // Handle date input changes
+  const handleDateChange = function(field, event) {
+    const dateValue = event.target.value;
+    const parsedDate = dateValue ? moment(dateValue).toDate() : null;
+    
+    console.log('📅 Date change:', field, dateValue, parsedDate);
+    handleNestedFilterChange('dateRange', field, parsedDate);
   };
 
   // Toggle expanded item
@@ -216,6 +242,7 @@ export function Timeline() {
 
   // Clear all filters
   const clearFilters = function() {
+    console.log('🧹 Clearing all filters');
     setFilters({
       dateRange: { start: null, end: null },
       resourceType: 'all',
@@ -223,6 +250,15 @@ export function Timeline() {
       sortBy: 'date',
       sortOrder: 'desc'
     });
+    setItemsPerPage(25);
+    setPage(1);
+  };
+
+  // Clear date range only
+  const clearDateRange = function() {
+    console.log('🧹 Clearing date range');
+    handleNestedFilterChange('dateRange', 'start', null);
+    handleNestedFilterChange('dateRange', 'end', null);
   };
 
   // Navigate to export preview with current filters
@@ -248,12 +284,15 @@ export function Timeline() {
     if (filters.sortOrder !== 'desc') {
       queryParams.set('sortOrder', filters.sortOrder);
     }
+    if (itemsPerPage !== 25) {
+      queryParams.set('limit', itemsPerPage);
+    }
 
     const queryString = queryParams.toString();
     const exportUrl = `/export-preview${queryString ? '?' + queryString : ''}`;
     
     navigate(exportUrl, {
-      state: { filters: filters }
+      state: { filters: filters, itemsPerPage: itemsPerPage }
     });
   };
 
@@ -271,6 +310,12 @@ export function Timeline() {
       default:
         return { icon: <TimelineIcon />, color: 'default', label: 'Unknown' };
     }
+  };
+
+  // Format date for input field
+  const formatDateForInput = function(date) {
+    if (!date) return '';
+    return moment(date).format('YYYY-MM-DD');
   };
 
   // Render timeline item
@@ -359,8 +404,6 @@ export function Timeline() {
           {/* Expanded Content */}
           <Collapse in={isExpanded} timeout="auto" unmountOnExit>
             <Box sx={{ pl: 7, pr: 2, pb: 1 }}>
-
-              
               {/* Metadata */}
               <Box display="flex" flexWrap="wrap" gap={1}>
                 {Object.entries(metadata).map(function([key, value]) {
@@ -456,8 +499,8 @@ export function Timeline() {
                 <Typography variant="h6">
                   Filters
                 </Typography>
-                <Button size="small" onClick={clearFilters}>
-                  Clear
+                <Button size="small" onClick={clearFilters} startIcon={<ClearIcon />}>
+                  Clear All
                 </Button>
               </Box>
 
@@ -489,44 +532,63 @@ export function Timeline() {
                 </Select>
               </FormControl>
 
-              {/* DISABLED: Date Range Controls */}
-              {/*
-              <Typography variant="subtitle2" sx={{ mb: 1 }}>
-                Date Range
-              </Typography>
-              
-              <DatePicker
-                label="Start Date"
-                value={filters.dateRange.start}
-                onChange={function(date) { handleNestedFilterChange('dateRange', 'start', date); }}
-                slots={{
-                  textField: TextField
-                }}
-                slotProps={{
-                  textField: {
-                    fullWidth: true,
-                    size: 'small',
-                    sx: { mb: 1 }
-                  }
-                }}
-              />
-              
-              <DatePicker
-                label="End Date"
-                value={filters.dateRange.end}
-                onChange={function(date) { handleNestedFilterChange('dateRange', 'end', date); }}
-                slots={{
-                  textField: TextField
-                }}
-                slotProps={{
-                  textField: {
-                    fullWidth: true,
-                    size: 'small',
-                    sx: { mb: 2 }
-                  }
-                }}
-              />
-              */}
+              {/* Date Range Controls */}
+              <Box sx={{ mb: 2 }}>
+                <Box display="flex" justifyContent="space-between" alignItems="center" mb={1}>
+                  <Typography variant="subtitle2">
+                    Date Range
+                  </Typography>
+                  {(filters.dateRange.start || filters.dateRange.end) && (
+                    <Button 
+                      size="small" 
+                      onClick={clearDateRange}
+                      startIcon={<ClearIcon />}
+                      sx={{ minWidth: 'auto', p: 0.5 }}
+                    >
+                      Clear
+                    </Button>
+                  )}
+                </Box>
+                
+                <TextField
+                  fullWidth
+                  type="date"
+                  label="Start Date"
+                  value={formatDateForInput(filters.dateRange.start)}
+                  onChange={function(e) { handleDateChange('start', e); }}
+                  InputLabelProps={{
+                    shrink: true,
+                  }}
+                  sx={{ mb: 1 }}
+                />
+                
+                <TextField
+                  fullWidth
+                  type="date"
+                  label="End Date"
+                  value={formatDateForInput(filters.dateRange.end)}
+                  onChange={function(e) { handleDateChange('end', e); }}
+                  InputLabelProps={{
+                    shrink: true,
+                  }}
+                  sx={{ mb: 2 }}
+                />
+              </Box>
+
+              {/* Items Per Page */}
+              <FormControl fullWidth sx={{ mb: 2 }}>
+                <InputLabel>Items Per Page</InputLabel>
+                <Select
+                  value={itemsPerPage}
+                  label="Items Per Page"
+                  onChange={handleItemsPerPageChange}
+                >
+                  <MenuItem value={10}>10 items</MenuItem>
+                  <MenuItem value={25}>25 items</MenuItem>
+                  <MenuItem value={50}>50 items</MenuItem>
+                  <MenuItem value={100}>100 items</MenuItem>
+                </Select>
+              </FormControl>
 
               {/* Sort Options */}
               <FormControl fullWidth sx={{ mb: 1 }}>
@@ -564,7 +626,10 @@ export function Timeline() {
                 </Typography>
                 <Box>
                   <Typography variant="body2" sx={{ mb: 1 }}>
-                    <strong>Timeline Results</strong> {timelineData.length} 
+                    <strong>Timeline Results:</strong> {timelineData.length} of {totalCount}
+                  </Typography>
+                  <Typography variant="body2" sx={{ mb: 1 }}>
+                    <strong>Current Page:</strong> {page} of {totalPages}
                   </Typography>
                   <Typography variant="body2" sx={{ mb: 1 }}>
                     <strong>Health Records:</strong> {stats.clinicalImpressions}
@@ -586,6 +651,30 @@ export function Timeline() {
 
         {/* Timeline Content */}
         <Grid item xs={12} md={9}>
+          {/* Results Summary */}
+          {!loading && timelineData.length > 0 && (
+            <Box sx={{ mb: 2, p: 2, bgcolor: 'background.paper', borderRadius: 1, border: 1, borderColor: 'divider' }}>
+              <Box display="flex" justifyContent="space-between" alignItems="center">
+                <Typography variant="body2" color="text.secondary">
+                  Showing {((page - 1) * itemsPerPage) + 1}-{Math.min(page * itemsPerPage, totalCount)} of {totalCount} results
+                  {(filters.dateRange.start || filters.dateRange.end) && (
+                    <span>
+                      {' '}• Date range: {filters.dateRange.start ? moment(filters.dateRange.start).format('MMM DD, YYYY') : 'All'} 
+                      {' - '} 
+                      {filters.dateRange.end ? moment(filters.dateRange.end).format('MMM DD, YYYY') : 'All'}
+                    </span>
+                  )}
+                </Typography>
+                
+                {totalPages > 1 && (
+                  <Typography variant="body2" color="text.secondary">
+                    Page {page} of {totalPages}
+                  </Typography>
+                )}
+              </Box>
+            </Box>
+          )}
+
           {loading ? (
             <Box>
               {[1, 2, 3, 4, 5].map(function(item) {
@@ -610,7 +699,7 @@ export function Timeline() {
                   No Timeline Data
                 </Typography>
                 <Typography variant="body1" color="text.secondary">
-                  {filters.searchQuery || filters.resourceType !== 'all' ? 
+                  {filters.searchQuery || filters.resourceType !== 'all' || filters.dateRange.start || filters.dateRange.end ? 
                     'No items match your current filters. Try adjusting your search criteria.' :
                     'Import your Facebook data to see your health timeline here.'
                   }
@@ -619,7 +708,6 @@ export function Timeline() {
             </Card>
           ) : (
             <Box>
-
               {/* Timeline Items */}
               <List sx={{ width: '100%' }}>
                 {timelineData.map(renderTimelineItem)}
@@ -636,7 +724,17 @@ export function Timeline() {
                     size="large"
                     showFirstButton
                     showLastButton
+                    sx={{ mb: 2 }}
                   />
+                </Box>
+              )}
+
+              {/* Bottom Results Summary */}
+              {timelineData.length > 0 && (
+                <Box sx={{ mt: 2, p: 2, bgcolor: 'background.paper', borderRadius: 1, border: 1, borderColor: 'divider' }}>
+                  <Typography variant="body2" color="text.secondary" align="center">
+                    Showing {((page - 1) * itemsPerPage) + 1}-{Math.min(page * itemsPerPage, totalCount)} of {totalCount} total results
+                  </Typography>
                 </Box>
               )}
             </Box>
